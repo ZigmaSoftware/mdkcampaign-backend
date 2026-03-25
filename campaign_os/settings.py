@@ -87,7 +87,7 @@ DATABASES = {
         'ENGINE': 'django.db.backends.mysql',
         'NAME': 'campaign_os',
         'USER': 'root',
-        'PASSWORD': 'admin@123',
+        'PASSWORD': 'Su$i0410',
         'HOST': 'localhost',
         'PORT': '3306',
         'OPTIONS': {
