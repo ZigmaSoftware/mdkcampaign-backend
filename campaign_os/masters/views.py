@@ -39,7 +39,7 @@ class StateViewSet(viewsets.ReadOnlyModelViewSet):
     search_fields = ['name', 'code']
 
 
-class DistrictViewSet(viewsets.ReadOnlyModelViewSet):
+class DistrictViewSet(viewsets.ModelViewSet):
     queryset = District.objects.filter(is_active=True).select_related('state')
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ['state']
