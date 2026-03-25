@@ -103,7 +103,7 @@ class VoterViewSet(viewsets.ModelViewSet):
                     'date_of_birth':   to_str(row.get('date_of_birth')) or None,
                     'age':             to_int(row.get('age')),
                     'phone':           to_str(row.get('phone')) or None,
-                    'phone2':          to_str(row.get('phone2')) or None,
+                    'phone2':          to_str(row.get('alt_phone') or row.get('phone2')) or None,
                     'email':           to_str(row.get('email')) or None,
                     'address':         to_str(row.get('address')) or None,
                     'booth_id':        booth_id,
