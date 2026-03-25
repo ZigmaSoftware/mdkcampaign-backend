@@ -1,0 +1,282 @@
+"""
+Serializers for master data
+"""
+from rest_framework import serializers
+from campaign_os.masters.models import (
+    Country, State, District, Constituency, Ward, Booth, PollingArea,
+    Candidate, Party, Scheme, Issue, Achievement
+)
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
+
+
+class CountrySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Country
+        fields = ['id', 'name', 'code', 'created_at', 'updated_at']
+
+
+class StateSerializer(serializers.ModelSerializer):
+    country_name = serializers.CharField(source='country.name', read_only=True)
+    
+    class Meta:
+        model = State
+        fields = ['id', 'country', 'country_name', 'name', 'code', 'created_at', 'updated_at']
+
+
+class DistrictSimpleSerializer(serializers.ModelSerializer):
+    """Minimal district info - for nested contexts"""
+    state_code = serializers.CharField(source='state.code', read_only=True)
+    
+    class Meta:
+        model = District
+        fields = ['id', 'name', 'code', 'state', 'state_code']
+
+
+class DistrictDetailSerializer(serializers.ModelSerializer):
+    """Full district details"""
+    state_name = serializers.CharField(source='state.name', read_only=True)
+    constituencies_count = serializers.SerializerMethodField()
+    booths_count = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = District
+        fields = [
+            'id', 'state', 'state_name', 'name', 'code', 'description',
+            'office_address', 'office_phone', 'office_email',
+            'latitude', 'longitude', 'constituencies_count', 'booths_count',
+            'created_at', 'updated_at'
+        ]
+    
+    def get_constituencies_count(self, obj):
+        return obj.constituencies.filter(is_active=True).count()
+    
+    def get_booths_count(self, obj):
+        return Booth.objects.filter(
+            ward__constituency__district=obj,
+            is_active=True
+        ).count()
+
+
+class ConstituencySimpleSerializer(serializers.ModelSerializer):
+    """Minimal constituency info"""
+    district_name = serializers.CharField(source='district.name', read_only=True)
+    
+    class Meta:
+        model = Constituency
+        fields = ['id', 'name', 'code', 'district', 'district_name']
+
+
+class ConstituencyDetailSerializer(serializers.ModelSerializer):
+    """Full constituency details"""
+    district_name = serializers.CharField(source='district.name', read_only=True)
+    state_name = serializers.CharField(source='district.state.name', read_only=True)
+    wards_count = serializers.SerializerMethodField()
+    booths_count = serializers.SerializerMethodField()
+    candidates = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Constituency
+        fields = [
+            'id', 'district', 'district_name', 'state_name', 'name', 'code',
+            'election_type', 'description', 'latitude', 'longitude',
+            'total_population', 'wards_count', 'booths_count', 'candidates',
+            'created_at', 'updated_at'
+        ]
+    
+    def get_wards_count(self, obj):
+        return obj.wards.filter(is_active=True).count()
+    
+    def get_booths_count(self, obj):
+        return Booth.objects.filter(
+            ward__constituency=obj,
+            is_active=True
+        ).count()
+    
+    def get_candidates(self, obj):
+        candidates = obj.candidates.filter(is_active=True)
+        return [{'id': c.id, 'name': c.name, 'party': c.party.name} for c in candidates]
+
+
+class WardSimpleSerializer(serializers.ModelSerializer):
+    """Minimal ward info"""
+    constituency_name = serializers.CharField(source='constituency.name', read_only=True)
+    
+    class Meta:
+        model = Ward
+        fields = ['id', 'name', 'code', 'constituency', 'constituency_name']
+
+
+class WardDetailSerializer(serializers.ModelSerializer):
+    """Full ward details"""
+    constituency_name = serializers.CharField(source='constituency.name', read_only=True)
+    booths_count = serializers.SerializerMethodField()
+    voters_count = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Ward
+        fields = [
+            'id', 'constituency', 'constituency_name', 'name', 'code',
+            'description', 'latitude', 'longitude', 'booths_count', 'voters_count',
+            'created_at', 'updated_at'
+        ]
+    
+    def get_booths_count(self, obj):
+        return obj.booths.filter(is_active=True).count()
+    
+    def get_voters_count(self, obj):
+        return obj.booths.aggregate(
+            total=serializers.IntegerField(default=0)
+        )['total']
+
+
+class BoothSimpleSerializer(serializers.ModelSerializer):
+    """Minimal booth info"""
+    ward_name = serializers.CharField(source='ward.name', read_only=True, default='')
+    ward = serializers.PrimaryKeyRelatedField(
+        queryset=Ward.objects.all(), required=False, allow_null=True
+    )
+
+    class Meta:
+        model = Booth
+        fields = ['id', 'number', 'name', 'code', 'ward', 'ward_name', 'status']
+
+
+class BoothDetailSerializer(serializers.ModelSerializer):
+    """Full booth details with coverage stats"""
+    ward_name = serializers.CharField(source='ward.name', read_only=True, default='')
+    ward = serializers.PrimaryKeyRelatedField(
+        queryset=Ward.objects.all(), required=False, allow_null=True
+    )
+    constituency_name = serializers.SerializerMethodField()
+    agent_name = serializers.CharField(source='primary_agent.get_full_name', read_only=True)
+    agent_ids = serializers.PrimaryKeyRelatedField(
+        source='agents', queryset=User.objects.all(), many=True, required=False
+    )
+    agent_names = serializers.SerializerMethodField()
+    google_maps_url = serializers.SerializerMethodField()
+    total_voters_calculated = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Booth
+        # Remove auto-generated UniqueTogetherValidator for ['ward','number']
+        # which incorrectly marks ward as required. DB still enforces uniqueness.
+        validators = []
+        fields = [
+            'id', 'ward', 'ward_name', 'constituency_name', 'number', 'name', 'code',
+            'address', 'village', 'latitude', 'longitude',
+            'total_voters', 'male_voters', 'female_voters', 'third_gender_voters',
+            'total_voters_calculated', 'primary_agent', 'agent_name',
+            'agent_ids', 'agent_names',
+            'status', 'sentiment', 'notes', 'google_maps_url',
+            'created_at', 'updated_at'
+        ]
+
+    def get_constituency_name(self, obj):
+        return obj.ward.constituency.name if obj.ward_id else ''
+
+    def get_google_maps_url(self, obj):
+        return obj.get_google_maps_url()
+
+    def get_total_voters_calculated(self, obj):
+        return obj.male_voters + obj.female_voters + obj.third_gender_voters
+
+    def get_agent_names(self, obj):
+        return [u.get_full_name() for u in obj.agents.all()]
+
+
+class PollingAreaSerializer(serializers.ModelSerializer):
+    """Polling Area (Maps to 'area' in frontend)"""
+    constituency_name = serializers.CharField(source='constituency.name', read_only=True)
+    
+    class Meta:
+        model = PollingArea
+        fields = [
+            'id', 'constituency', 'constituency_name', 'name', 'code',
+            'description', 'latitude', 'longitude', 'created_at', 'updated_at'
+        ]
+
+
+class PartySerializer(serializers.ModelSerializer):
+    """Political Party"""
+    candidates_count = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Party
+        fields = [
+            'id', 'name', 'code', 'abbreviation', 'description',
+            'founded_year', 'headquarters', 'president_name',
+            'primary_color', 'secondary_color', 'logo',
+            'is_national', 'candidates_count', 'created_at', 'updated_at'
+        ]
+    
+    def get_candidates_count(self, obj):
+        return obj.candidates.filter(is_active=True).count()
+
+
+class CandidateDetailSerializer(serializers.ModelSerializer):
+    """Candidate details"""
+    party_name = serializers.CharField(source='party.name', read_only=True)
+    party_color = serializers.CharField(source='party.primary_color', read_only=True)
+    constituency_name = serializers.CharField(source='constituency.name', read_only=True)
+    
+    class Meta:
+        model = Candidate
+        fields = [
+            'id', 'name', 'father_name', 'date_of_birth', 'gender',
+            'party', 'party_name', 'party_color', 'constituency', 'constituency_name',
+            'phone', 'email', 'address', 'educational_qualification',
+            'professional_background', 'photo', 'bio',
+            'is_incumbent', 'election_symbol',
+            'created_at', 'updated_at'
+        ]
+
+
+class CandidateSimpleSerializer(serializers.ModelSerializer):
+    """Minimal candidate info"""
+    party_name = serializers.CharField(source='party.name', read_only=True)
+    party_color = serializers.CharField(source='party.primary_color', read_only=True)
+    
+    class Meta:
+        model = Candidate
+        fields = ['id', 'name', 'party', 'party_name', 'party_color', 'is_incumbent']
+
+
+class SchemeSerializer(serializers.ModelSerializer):
+    """Campaign/Government Scheme"""
+    constituency_name = serializers.CharField(source='constituency.name', read_only=True)
+    
+    class Meta:
+        model = Scheme
+        fields = [
+            'id', 'name', 'description', 'scheme_type',
+            'constituency', 'constituency_name',
+            'launch_date', 'end_date',
+            'target_population', 'beneficiaries', 'budget',
+            'responsible_ministry', 'created_at', 'updated_at'
+        ]
+
+
+class IssueSerializer(serializers.ModelSerializer):
+    """Community Issue/Grievance Type"""
+    class Meta:
+        model = Issue
+        fields = [
+            'id', 'name', 'description', 'category', 'priority',
+            'created_at', 'updated_at'
+        ]
+
+
+class AchievementSerializer(serializers.ModelSerializer):
+    """Campaign Achievement"""
+    ward_name  = serializers.CharField(source='ward.name',  read_only=True)
+    booth_name = serializers.CharField(source='booth.name', read_only=True)
+
+    class Meta:
+        model = Achievement
+        fields = [
+            'id', 'name', 'description',
+            'ward', 'ward_name', 'booth', 'booth_name',
+            'created_at', 'updated_at'
+        ]

@@ -1,0 +1,407 @@
+"""
+Views for master data management
+"""
+from rest_framework import viewsets, status, permissions, filters
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from rest_framework.parsers import MultiPartParser
+from django_filters.rest_framework import DjangoFilterBackend
+from django.db.models import Count, Q, IntegerField
+from django.db.models.functions import Cast
+from campaign_os.masters.models import (
+    Country, State, District, Constituency, Ward, Booth, PollingArea,
+    Candidate, Party, Scheme, Issue, Achievement
+)
+from campaign_os.masters.serializers import (
+    CountrySerializer, StateSerializer, DistrictSimpleSerializer, DistrictDetailSerializer,
+    ConstituencySimpleSerializer, ConstituencyDetailSerializer,
+    WardSimpleSerializer, WardDetailSerializer,
+    BoothSimpleSerializer, BoothDetailSerializer, PollingAreaSerializer,
+    PartySerializer, CandidateDetailSerializer, CandidateSimpleSerializer,
+    SchemeSerializer, IssueSerializer, AchievementSerializer
+)
+from campaign_os.core.utils.bulk_upload import (
+    parse_upload, BulkResult, resolve_by_code, to_int, to_str, to_bool
+)
+
+
+class CountryViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Country.objects.all()
+    serializer_class = CountrySerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+
+class StateViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = State.objects.all()
+    serializer_class = StateSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filterset_fields = ['country']
+    search_fields = ['name', 'code']
+
+
+class DistrictViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = District.objects.filter(is_active=True).select_related('state')
+    permission_classes = [permissions.IsAuthenticated]
+    filterset_fields = ['state']
+    search_fields = ['name', 'code']
+    ordering = ['name']
+
+    def get_serializer_class(self):
+        return DistrictDetailSerializer if self.action == 'retrieve' else DistrictSimpleSerializer
+
+    @action(detail=True, methods=['GET'])
+    def constituencies(self, request, pk=None):
+        district = self.get_object()
+        return Response(ConstituencySimpleSerializer(
+            district.constituencies.filter(is_active=True), many=True
+        ).data)
+
+    @action(detail=True, methods=['GET'])
+    def booths(self, request, pk=None):
+        district = self.get_object()
+        booths = Booth.objects.filter(
+            ward__constituency__district=district, is_active=True
+        ).select_related('ward')
+        return Response(BoothSimpleSerializer(booths, many=True).data)
+
+
+class ConstituencyViewSet(viewsets.ModelViewSet):
+    queryset = Constituency.objects.filter(is_active=True).select_related('district')
+    permission_classes = [permissions.IsAuthenticated]
+    filterset_fields = ['district', 'election_type']
+    search_fields = ['name', 'code']
+    ordering = ['name']
+
+    def get_serializer_class(self):
+        return ConstituencyDetailSerializer if self.action == 'retrieve' else ConstituencySimpleSerializer
+
+    @action(detail=True, methods=['GET'])
+    def wards(self, request, pk=None):
+        const = self.get_object()
+        return Response(WardSimpleSerializer(const.wards.filter(is_active=True), many=True).data)
+
+    @action(detail=True, methods=['GET'])
+    def candidates(self, request, pk=None):
+        const = self.get_object()
+        return Response(CandidateSimpleSerializer(const.candidates.filter(is_active=True), many=True).data)
+
+    # ── bulk upload ──────────────────────────────────────────────────────────
+    @action(detail=False, methods=['POST'], url_path='bulk-upload',
+            parser_classes=[MultiPartParser])
+    def bulk_upload(self, request):
+        """
+        CSV columns: name, code (required), district_code, election_type
+        """
+        rows, err = parse_upload(request)
+        if err:
+            return Response({'detail': err}, status=status.HTTP_400_BAD_REQUEST)
+        result = BulkResult()
+        for i, row in enumerate(rows, start=2):
+            code = to_str(row.get('code'))
+            if not code:
+                result.fail(i, 'code is required'); continue
+            try:
+                district_id = resolve_by_code(District, row.get('district_code', ''))
+                _, created = Constituency.objects.get_or_create(
+                    code=code,
+                    defaults={
+                        'name':          to_str(row.get('name')) or None,
+                        'district_id':   district_id,
+                        'election_type': to_str(row.get('election_type')) or 'assembly',
+                    }
+                )
+                result.ok(created)
+            except Exception as exc:
+                result.fail(i, str(exc))
+        return Response(result.summary())
+
+
+class WardViewSet(viewsets.ModelViewSet):
+    queryset = Ward.objects.filter(is_active=True).select_related('constituency')
+    permission_classes = [permissions.IsAuthenticated]
+    filterset_fields = ['constituency']
+    search_fields = ['name', 'code']
+
+    def get_serializer_class(self):
+        return WardDetailSerializer if self.action == 'retrieve' else WardSimpleSerializer
+
+    @action(detail=True, methods=['GET'])
+    def booths(self, request, pk=None):
+        ward = self.get_object()
+        return Response(BoothDetailSerializer(ward.booths.filter(is_active=True), many=True).data)
+
+    # ── bulk upload ──────────────────────────────────────────────────────────
+    @action(detail=False, methods=['POST'], url_path='bulk-upload',
+            parser_classes=[MultiPartParser])
+    def bulk_upload(self, request):
+        """
+        CSV columns: name, code, constituency_code
+        """
+        rows, err = parse_upload(request)
+        if err:
+            return Response({'detail': err}, status=status.HTTP_400_BAD_REQUEST)
+        result = BulkResult()
+        for i, row in enumerate(rows, start=2):
+            name = to_str(row.get('name'))
+            code = to_str(row.get('code'))
+            if not (name or code):
+                result.fail(i, 'name or code is required'); continue
+            try:
+                const_id = resolve_by_code(Constituency, row.get('constituency_code', ''))
+                _, created = Ward.objects.get_or_create(
+                    constituency_id=const_id,
+                    code=code or name[:5],
+                    defaults={'name': name, 'constituency_id': const_id}
+                )
+                result.ok(created)
+            except Exception as exc:
+                result.fail(i, str(exc))
+        return Response(result.summary())
+
+
+class BoothViewSet(viewsets.ModelViewSet):
+    queryset = (
+        Booth.objects.filter(is_active=True)
+             .select_related('ward', 'ward__constituency', 'primary_agent')
+             .prefetch_related('agents')
+             .annotate(number_int=Cast('number', output_field=IntegerField()))
+             .order_by('number_int')
+    )
+    permission_classes = [permissions.IsAuthenticated]
+    filterset_fields = ['ward', 'status', 'sentiment']
+    search_fields = ['name', 'number', 'code', 'address']
+    ordering = ['number_int']
+
+    def get_serializer_class(self):
+        if self.action in ['create', 'update', 'partial_update', 'retrieve']:
+            return BoothDetailSerializer
+        return BoothSimpleSerializer
+
+    @action(detail=True, methods=['GET'])
+    def voters(self, request, pk=None):
+        booth = self.get_object()
+        from campaign_os.voters.models import Voter
+        from campaign_os.voters.serializers import VoterSerializer
+        return Response(VoterSerializer(booth.voters.filter(is_active=True), many=True).data)
+
+    @action(detail=True, methods=['POST'])
+    def assign_agent(self, request, pk=None):
+        booth    = self.get_object()
+        agent_id = request.data.get('agent_id')
+        if not agent_id:
+            return Response({'detail': 'agent_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        from campaign_os.accounts.models import User
+        try:
+            booth.primary_agent = User.objects.get(id=agent_id)
+            booth.save()
+            return Response({'detail': 'Agent assigned successfully'})
+        except User.DoesNotExist:
+            return Response({'detail': 'Agent not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    @action(detail=True, methods=['GET'])
+    def nearby(self, request, pk=None):
+        booth = self.get_object()
+        if not booth.latitude or not booth.longitude:
+            return Response({'detail': 'Booth location not available'})
+        nearby = Booth.objects.filter(
+            ward__constituency=booth.ward.constituency if booth.ward_id else None,
+            is_active=True
+        ).exclude(id=booth.id)[:10]
+        return Response(BoothSimpleSerializer(nearby, many=True).data)
+
+    # ── bulk upload ──────────────────────────────────────────────────────────
+    @action(detail=False, methods=['POST'], url_path='bulk-upload',
+            parser_classes=[MultiPartParser])
+    def bulk_upload(self, request):
+        """
+        CSV columns:
+          code (required), number, name, ward_code,
+          address, village, total_voters, male_voters, female_voters,
+          third_gender_voters, status, sentiment, notes
+        """
+        rows, err = parse_upload(request)
+        if err:
+            return Response({'detail': err}, status=status.HTTP_400_BAD_REQUEST)
+        result = BulkResult()
+        for i, row in enumerate(rows, start=2):
+            code = to_str(row.get('code'))
+            if not code:
+                result.fail(i, 'code is required'); continue
+            try:
+                ward_id = resolve_by_code(Ward, row.get('ward_code', ''))
+                _, created = Booth.objects.get_or_create(
+                    code=code,
+                    defaults={
+                        'number':               to_str(row.get('number'))  or None,
+                        'name':                 to_str(row.get('name'))    or None,
+                        'ward_id':              ward_id,
+                        'address':              to_str(row.get('address')) or None,
+                        'village':              to_str(row.get('village')) or None,
+                        'total_voters':         to_int(row.get('total_voters'))         or 0,
+                        'male_voters':          to_int(row.get('male_voters'))          or 0,
+                        'female_voters':        to_int(row.get('female_voters'))        or 0,
+                        'third_gender_voters':  to_int(row.get('third_gender_voters'))  or 0,
+                        'status':               to_str(row.get('status'))    or 'pending',
+                        'sentiment':            to_str(row.get('sentiment')) or 'neutral',
+                        'notes':                to_str(row.get('notes'))     or None,
+                    }
+                )
+                result.ok(created)
+            except Exception as exc:
+                result.fail(i, str(exc))
+        return Response(result.summary())
+
+
+class PollingAreaViewSet(viewsets.ModelViewSet):
+    queryset = PollingArea.objects.filter(is_active=True).select_related('constituency')
+    serializer_class = PollingAreaSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filterset_fields = ['constituency']
+    search_fields = ['name', 'code']
+
+
+class PartyViewSet(viewsets.ModelViewSet):
+    queryset = Party.objects.filter(is_active=True)
+    serializer_class = PartySerializer
+    permission_classes = [permissions.IsAuthenticated]
+    search_fields = ['name', 'code', 'abbreviation']
+    ordering = ['name']
+
+    @action(detail=True, methods=['GET'])
+    def candidates(self, request, pk=None):
+        party = self.get_object()
+        return Response(CandidateSimpleSerializer(party.candidates.filter(is_active=True), many=True).data)
+
+    # ── bulk upload ──────────────────────────────────────────────────────────
+    @action(detail=False, methods=['POST'], url_path='bulk-upload',
+            parser_classes=[MultiPartParser])
+    def bulk_upload(self, request):
+        """
+        CSV columns: name, code, abbreviation (all required as unique keys),
+          primary_color, secondary_color, headquarters, president_name, founded_year
+        """
+        rows, err = parse_upload(request)
+        if err:
+            return Response({'detail': err}, status=status.HTTP_400_BAD_REQUEST)
+        result = BulkResult()
+        for i, row in enumerate(rows, start=2):
+            code = to_str(row.get('code'))
+            if not code:
+                result.fail(i, 'code is required'); continue
+            try:
+                abbr = to_str(row.get('abbreviation')) or code
+                _, created = Party.objects.get_or_create(
+                    code=code,
+                    defaults={
+                        'name':            to_str(row.get('name'))           or code,
+                        'abbreviation':    abbr,
+                        'primary_color':   to_str(row.get('primary_color'))  or None,
+                        'secondary_color': to_str(row.get('secondary_color'))or None,
+                        'headquarters':    to_str(row.get('headquarters'))   or None,
+                        'president_name':  to_str(row.get('president_name')) or None,
+                        'founded_year':    to_int(row.get('founded_year')),
+                    }
+                )
+                result.ok(created)
+            except Exception as exc:
+                result.fail(i, str(exc))
+        return Response(result.summary())
+
+
+class CandidateViewSet(viewsets.ModelViewSet):
+    queryset = Candidate.objects.filter(is_active=True).select_related('party', 'constituency')
+    permission_classes = [permissions.IsAuthenticated]
+    filterset_fields = ['party', 'constituency', 'is_incumbent']
+    search_fields = ['name', 'father_name']
+    ordering = ['name']
+
+    def get_serializer_class(self):
+        return CandidateDetailSerializer if self.action == 'retrieve' else CandidateSimpleSerializer
+
+    # ── bulk upload ──────────────────────────────────────────────────────────
+    @action(detail=False, methods=['POST'], url_path='bulk-upload',
+            parser_classes=[MultiPartParser])
+    def bulk_upload(self, request):
+        """
+        CSV columns:
+          name (required), party_code, constituency_code,
+          gender (m/f/o), phone, email, is_incumbent (true/false)
+        """
+        rows, err = parse_upload(request)
+        if err:
+            return Response({'detail': err}, status=status.HTTP_400_BAD_REQUEST)
+        result = BulkResult()
+        for i, row in enumerate(rows, start=2):
+            name = to_str(row.get('name'))
+            if not name:
+                result.fail(i, 'name is required'); continue
+            try:
+                party_id = resolve_by_code(Party, row.get('party_code', ''))
+                const_id = resolve_by_code(Constituency, row.get('constituency_code', ''))
+                _, created = Candidate.objects.get_or_create(
+                    name=name,
+                    party_id=party_id,
+                    constituency_id=const_id,
+                    defaults={
+                        'gender':       to_str(row.get('gender')) or None,
+                        'phone':        to_str(row.get('phone'))  or None,
+                        'email':        to_str(row.get('email'))  or None,
+                        'is_incumbent': to_bool(row.get('is_incumbent')) or False,
+                    }
+                )
+                result.ok(created)
+            except Exception as exc:
+                result.fail(i, str(exc))
+        return Response(result.summary())
+
+
+class SchemeViewSet(viewsets.ModelViewSet):
+    queryset = Scheme.objects.filter(is_active=True).select_related('constituency')
+    serializer_class = SchemeSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filterset_fields = ['scheme_type', 'constituency']
+    search_fields = ['name', 'description']
+    ordering = ['-created_at']
+
+    # ── bulk upload ──────────────────────────────────────────────────────────
+    @action(detail=False, methods=['POST'], url_path='bulk-upload',
+            parser_classes=[MultiPartParser])
+    def bulk_upload(self, request):
+        """
+        CSV columns:
+          name (required), description, scheme_type, constituency_code,
+          launch_date (YYYY-MM-DD), responsible_ministry
+        """
+        rows, err = parse_upload(request)
+        if err:
+            return Response({'detail': err}, status=status.HTTP_400_BAD_REQUEST)
+        result = BulkResult()
+        for i, row in enumerate(rows, start=2):
+            name = to_str(row.get('name'))
+            if not name:
+                result.fail(i, 'name is required'); continue
+            try:
+                const_id = resolve_by_code(Constituency, row.get('constituency_code', ''))
+                _, created = Scheme.objects.get_or_create(
+                    name=name,
+                    defaults={
+                        'description':         to_str(row.get('description'))         or None,
+                        'scheme_type':         to_str(row.get('scheme_type'))         or None,
+                        'constituency_id':     const_id,
+                        'launch_date':         to_str(row.get('launch_date'))         or None,
+                        'responsible_ministry':to_str(row.get('responsible_ministry'))or None,
+                    }
+                )
+                result.ok(created)
+            except Exception as exc:
+                result.fail(i, str(exc))
+        return Response(result.summary())
+
+
+class AchievementViewSet(viewsets.ModelViewSet):
+    queryset = Achievement.objects.filter(is_active=True).select_related('ward', 'booth')
+    serializer_class = AchievementSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filterset_fields = ['ward', 'booth']
+    search_fields = ['name', 'description']
+    ordering = ['-created_at']
