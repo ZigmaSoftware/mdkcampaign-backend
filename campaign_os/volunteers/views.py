@@ -18,19 +18,23 @@ class VolunteerViewSet(viewsets.ModelViewSet):
     serializer_class = VolunteerSerializer
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ['booth', 'status', 'ward']
-    search_fields = ['user__username', 'user__first_name', 'user__last_name']
+    search_fields = ['name', 'user__username', 'user__first_name', 'user__last_name']
 
     @action(detail=False, methods=['GET'], url_path='names')
     def names(self, request):
-        """Return minimal volunteer list for agent multiselect"""
-        data = [
-            {
-                'id':        v.user_id,
-                'user_name': v.user.get_full_name() or v.user.username,
-                'phone':     getattr(v.user, 'phone', '') or '',
-            }
-            for v in self.get_queryset()
-        ]
+        """Return minimal volunteer list for agent/booth dropdown"""
+        data = []
+        for v in self.get_queryset():
+            if v.name:
+                vol_name = v.name
+                phone    = v.phone or ''
+            elif v.user_id:
+                vol_name = v.user.get_full_name() or v.user.username
+                phone    = getattr(v.user, 'phone', '') or v.phone or ''
+            else:
+                vol_name = f'Volunteer #{v.id}'
+                phone    = v.phone or ''
+            data.append({'id': v.id, 'user_name': vol_name, 'phone': phone})
         return Response(data)
 
     def perform_create(self, serializer):
@@ -52,11 +56,10 @@ class VolunteerViewSet(viewsets.ModelViewSet):
         Multipart field: file (.csv or .xlsx)
 
         CSV columns:
-          username (required), first_name, last_name, phone,
+          name (required), phone, alt_phone,
           booth_code, ward_code, volunteer_type, role, skills,
-          block, gender, age, notes
+          block, gender, age, notes, status
         """
-        from campaign_os.accounts.models import User
         from campaign_os.masters.models import Booth, Ward
 
         rows, err = parse_upload(request)
@@ -65,26 +68,19 @@ class VolunteerViewSet(viewsets.ModelViewSet):
 
         result = BulkResult()
         for i, row in enumerate(rows, start=2):
-            username = to_str(row.get('username'))
-            if not username:
-                result.fail(i, 'username is required')
+            name = to_str(row.get('name'))
+            if not name:
+                result.fail(i, 'name is required')
                 continue
             try:
-                user, _ = User.objects.get_or_create(
-                    username=username,
-                    defaults={
-                        'first_name': to_str(row.get('first_name')),
-                        'last_name':  to_str(row.get('last_name')),
-                        'phone':      to_str(row.get('phone')) or None,
-                        'role':       'volunteer',
-                    }
-                )
                 booth_id = resolve_by_code(Booth, row.get('booth_code', ''))
                 ward_id  = resolve_by_code(Ward,  row.get('ward_code',  ''))
 
                 _, created = Volunteer.objects.get_or_create(
-                    user=user,
+                    name=name,
                     defaults={
+                        'phone':          to_str(row.get('phone'))           or None,
+                        'phone2':         to_str(row.get('alt_phone'))       or None,
                         'booth_id':       booth_id,
                         'ward_id':        ward_id,
                         'volunteer_type': to_str(row.get('volunteer_type')) or None,
@@ -94,6 +90,7 @@ class VolunteerViewSet(viewsets.ModelViewSet):
                         'gender':         to_str(row.get('gender'))         or None,
                         'age':            to_int(row.get('age')),
                         'notes':          to_str(row.get('notes'))          or None,
+                        'status':         to_str(row.get('status'))         or 'active',
                     }
                 )
                 result.ok(created)

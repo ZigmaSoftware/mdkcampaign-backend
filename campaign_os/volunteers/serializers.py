@@ -6,15 +6,28 @@ from campaign_os.volunteers.models import Volunteer, VolunteerTask, VolunteerAtt
 
 
 class VolunteerSerializer(serializers.ModelSerializer):
-    user_name = serializers.CharField(source='user.get_full_name', read_only=True)
+    user_name  = serializers.SerializerMethodField()
     booth_name = serializers.CharField(source='booth.name', read_only=True)
-    username = serializers.CharField(source='user.username', read_only=True)
-    phone = serializers.CharField(source='user.phone', read_only=True)
+    username   = serializers.SerializerMethodField()
+    phone      = serializers.SerializerMethodField()
+
+    def get_user_name(self, obj):
+        if obj.name:
+            return obj.name
+        if obj.user_id:
+            return obj.user.get_full_name() or obj.user.username
+        return f'Volunteer #{obj.id}'
+
+    def get_username(self, obj):
+        return obj.user.username if obj.user_id else ''
+
+    def get_phone(self, obj):
+        return obj.phone or (getattr(obj.user, 'phone', '') if obj.user_id else '')
 
     class Meta:
         model = Volunteer
         fields = [
-            'id', 'user', 'user_name', 'username', 'phone',
+            'id', 'user', 'user_name', 'username', 'name', 'phone',
             'booth', 'booth_name', 'ward', 'block',
             'status', 'volunteer_type', 'role', 'age', 'gender', 'joined_date',
             'source', 'skills', 'vehicle', 'notes', 'phone2',

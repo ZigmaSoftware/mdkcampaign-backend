@@ -168,6 +168,10 @@ class Booth(BaseModel):
         'accounts.User', on_delete=models.SET_NULL, null=True, blank=True,
         related_name='primary_booths', db_constraint=False
     )
+    primary_volunteer = models.ForeignKey(
+        'volunteers.Volunteer', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='primary_booths', db_constraint=False
+    )
     agents = models.ManyToManyField('accounts.User', blank=True, related_name='agent_booths')
 
     # Status tracking

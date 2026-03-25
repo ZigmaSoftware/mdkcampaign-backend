@@ -150,7 +150,8 @@ class BoothDetailSerializer(serializers.ModelSerializer):
         queryset=Ward.objects.all(), required=False, allow_null=True
     )
     constituency_name = serializers.SerializerMethodField()
-    agent_name = serializers.CharField(source='primary_agent.get_full_name', read_only=True)
+    primary_volunteer = serializers.PrimaryKeyRelatedField(read_only=True)
+    agent_name = serializers.SerializerMethodField()
     agent_ids = serializers.PrimaryKeyRelatedField(
         source='agents', queryset=User.objects.all(), many=True, required=False
     )
@@ -168,6 +169,7 @@ class BoothDetailSerializer(serializers.ModelSerializer):
             'address', 'village', 'latitude', 'longitude',
             'total_voters', 'male_voters', 'female_voters', 'third_gender_voters',
             'total_voters_calculated', 'primary_agent', 'agent_name',
+            'primary_volunteer',
             'agent_ids', 'agent_names',
             'status', 'sentiment', 'notes', 'google_maps_url',
             'created_at', 'updated_at'
@@ -184,6 +186,14 @@ class BoothDetailSerializer(serializers.ModelSerializer):
 
     def get_agent_names(self, obj):
         return [u.get_full_name() for u in obj.agents.all()]
+
+    def get_agent_name(self, obj):
+        if hasattr(obj, 'primary_volunteer') and obj.primary_volunteer_id:
+            pv = obj.primary_volunteer
+            return pv.name or (pv.user.get_full_name() if pv.user_id else f'Volunteer #{pv.id}')
+        if obj.primary_agent_id:
+            return obj.primary_agent.get_full_name()
+        return ''
 
 
 class PollingAreaSerializer(serializers.ModelSerializer):

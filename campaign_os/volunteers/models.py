@@ -8,9 +8,12 @@ from campaign_os.core.models import BaseModel
 class Volunteer(BaseModel):
     """Volunteer/Campaign Worker"""
     user = models.OneToOneField(
-        'accounts.User', on_delete=models.CASCADE,
+        'accounts.User', on_delete=models.SET_NULL,
+        null=True, blank=True,
         related_name='volunteer_profile', db_constraint=False
     )
+    name  = models.CharField(max_length=150, blank=True, null=True)
+    phone = models.CharField(max_length=20, blank=True, null=True)
 
     # Assignment
     booth = models.ForeignKey(
@@ -69,7 +72,7 @@ class Volunteer(BaseModel):
         ]
 
     def __str__(self):
-        return f"{self.user.get_full_name()} (Volunteer)"
+        return self.name or (self.user.get_full_name() if self.user_id else f'Volunteer #{self.id}')
 
 
 class VolunteerTask(BaseModel):

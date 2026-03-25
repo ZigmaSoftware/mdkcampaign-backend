@@ -217,7 +217,7 @@ class BoothViewSet(viewsets.ModelViewSet):
         CSV columns:
           code (required), number, name, ward_code,
           address, village, total_voters, male_voters, female_voters,
-          third_gender_voters, status, sentiment, notes
+          third_gender_voters, status, sentiment, notes, volunteer_name
         """
         rows, err = parse_upload(request)
         if err:
@@ -229,6 +229,14 @@ class BoothViewSet(viewsets.ModelViewSet):
                 result.fail(i, 'code is required'); continue
             try:
                 ward_id = resolve_by_code(Ward, row.get('ward_code', ''))
+                # resolve primary_volunteer by name
+                vol_name = to_str(row.get('volunteer_name'))
+                primary_volunteer_id = None
+                if vol_name:
+                    from campaign_os.volunteers.models import Volunteer as Vol
+                    v = Vol.objects.filter(name=vol_name, is_active=True).first()
+                    if v:
+                        primary_volunteer_id = v.id
                 _, created = Booth.objects.get_or_create(
                     code=code,
                     defaults={
@@ -244,6 +252,7 @@ class BoothViewSet(viewsets.ModelViewSet):
                         'status':               to_str(row.get('status'))    or 'pending',
                         'sentiment':            to_str(row.get('sentiment')) or 'neutral',
                         'notes':                to_str(row.get('notes'))     or None,
+                        'primary_volunteer_id': primary_volunteer_id,
                     }
                 )
                 result.ok(created)
