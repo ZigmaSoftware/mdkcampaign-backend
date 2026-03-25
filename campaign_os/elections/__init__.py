@@ -1,5 +1,1 @@
-from django.apps import AppConfig
-
-class ElectionsConfig(AppConfig):
-    default_auto_field = 'django.db.models.BigAutoField'
-    name = 'campaign_os.elections'
+default_app_config = 'campaign_os.elections.apps.ElectionsConfig'

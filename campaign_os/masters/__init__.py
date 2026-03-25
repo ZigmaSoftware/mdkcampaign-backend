@@ -1,5 +1,1 @@
-from django.apps import AppConfig
-
-class MastersConfig(AppConfig):
-    default_auto_field = 'django.db.models.BigAutoField'
-    name = 'campaign_os.masters'
+default_app_config = 'campaign_os.masters.apps.MastersConfig'

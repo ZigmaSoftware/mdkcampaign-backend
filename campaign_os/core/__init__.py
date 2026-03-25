@@ -1,5 +1,1 @@
-from django.apps import AppConfig
-
-class CoreConfig(AppConfig):
-    default_auto_field = 'django.db.models.BigAutoField'
-    name = 'campaign_os.core'
+default_app_config = 'campaign_os.core.apps.CoreConfig'

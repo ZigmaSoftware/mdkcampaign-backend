@@ -86,42 +86,81 @@ class VoterViewSet(viewsets.ModelViewSet):
         if err:
             return Response({'detail': err}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Build booth/ward lookup maps once (avoid per-row DB hits)
+        booth_map = {b.code: b.id for b in Booth.objects.only('id', 'code')}
+        ward_map  = {w.code: w.id for w in Ward.objects.only('id', 'code')}
+
+        # Find existing voter_ids to skip duplicates
+        all_ids = []
+        for row in rows:
+            vid = to_str(row.get('voter_id') or row.get('epic') or row.get('epic_no'))
+            if vid:
+                all_ids.append(vid)
+        existing_ids = set(
+            Voter.objects.filter(voter_id__in=all_ids).values_list('voter_id', flat=True)
+        )
+
         result = BulkResult()
+        batch = []
+        BATCH_SIZE = 1000
+
         for i, row in enumerate(rows, start=2):
             voter_id = to_str(row.get('voter_id') or row.get('epic') or row.get('epic_no'))
             if not voter_id:
                 result.fail(i, 'voter_id is required')
                 continue
+            if voter_id in existing_ids:
+                result.ok(False)   # skipped (already exists)
+                continue
             try:
-                booth_id = resolve_by_code(Booth, row.get('booth_code', ''))
-                ward_id  = resolve_by_code(Ward,  row.get('ward_code', ''))
-
-                defaults = {
-                    'name':            to_str(row.get('name')),
-                    'father_name':     to_str(row.get('father_name')),
-                    'gender':          to_str(row.get('gender')) or None,
-                    'date_of_birth':   to_str(row.get('date_of_birth')) or None,
-                    'age':             to_int(row.get('age')),
-                    'phone':           to_str(row.get('phone')) or None,
-                    'phone2':          to_str(row.get('alt_phone') or row.get('phone2')) or None,
-                    'email':           to_str(row.get('email')) or None,
-                    'address':         to_str(row.get('address')) or None,
-                    'booth_id':        booth_id,
-                    'village_id':      ward_id,
-                    'religion':        to_str(row.get('religion')) or None,
-                    'caste':           to_str(row.get('caste')) or None,
-                    'sub_caste':       to_str(row.get('sub_caste')) or None,
-                    'sentiment':       to_str(row.get('sentiment')) or 'undecided',
-                    'education_level': to_str(row.get('education_level')) or None,
-                    'occupation':      to_str(row.get('occupation')) or None,
-                    'scheme_name':     to_str(row.get('scheme_name')) or None,
-                    'issue_name':      to_str(row.get('issue_name')) or None,
-                    'notes':           to_str(row.get('notes')) or None,
-                }
-                _, created = Voter.objects.get_or_create(voter_id=voter_id, defaults=defaults)
-                result.ok(created)
+                bc = to_str(row.get('booth_code', ''))
+                wc = to_str(row.get('ward_code', ''))
+                batch.append(Voter(
+                    voter_id       = voter_id,
+                    name           = to_str(row.get('name')),
+                    father_name    = to_str(row.get('father_name')),
+                    gender         = to_str(row.get('gender')) or None,
+                    date_of_birth  = to_str(row.get('date_of_birth')) or None,
+                    age            = to_int(row.get('age')),
+                    phone          = to_str(row.get('phone')) or None,
+                    phone2         = to_str(row.get('alt_phone') or row.get('phone2')) or None,
+                    email          = to_str(row.get('email')) or None,
+                    address        = to_str(row.get('address')) or None,
+                    booth_id       = booth_map.get(bc),
+                    village_id     = ward_map.get(wc),
+                    religion       = to_str(row.get('religion')) or None,
+                    caste          = to_str(row.get('caste')) or None,
+                    sub_caste      = to_str(row.get('sub_caste')) or None,
+                    sentiment      = to_str(row.get('sentiment')) or 'undecided',
+                    education_level= to_str(row.get('education_level')) or None,
+                    occupation     = to_str(row.get('occupation')) or None,
+                    scheme_name    = to_str(row.get('scheme_name')) or None,
+                    issue_name     = to_str(row.get('issue_name')) or None,
+                    notes          = to_str(row.get('notes')) or None,
+                ))
+                existing_ids.add(voter_id)   # prevent duplicates within same file
             except Exception as exc:
                 result.fail(i, str(exc))
+                continue
+
+            if len(batch) >= BATCH_SIZE:
+                try:
+                    Voter.objects.bulk_create(batch, ignore_conflicts=True)
+                    for _ in batch:
+                        result.ok(True)
+                except Exception as exc:
+                    for _ in batch:
+                        result.fail(i, str(exc))
+                batch = []
+
+        if batch:
+            try:
+                Voter.objects.bulk_create(batch, ignore_conflicts=True)
+                for _ in batch:
+                    result.ok(True)
+            except Exception as exc:
+                for b in batch:
+                    result.fail(0, str(exc))
 
         return Response(result.summary(), status=status.HTTP_200_OK)
 
