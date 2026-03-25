@@ -35,16 +35,7 @@ class Command(BaseCommand):
         for opt in q1_options:
             PollOption.objects.create(poll=poll, question_no=1, **opt)
 
-        # Q2 - Candidate options
-        q2_options = [
-            {'key': 'kirthika', 'name': 'Kirthika Shivkumar', 'sub_label': 'BJP · Constituency 100',       'icon_bg': 'linear-gradient(135deg,#FF9933,#e07010)', 'bar_color': '#FF9933', 'display_order': 1},
-            {'key': 'dmk',      'name': 'DMK Candidate',      'sub_label': 'DMK + INC Alliance',            'icon_bg': 'linear-gradient(135deg,#1a56db,#1e40af)', 'bar_color': '#3b82f6', 'display_order': 2},
-            {'key': 'tvk',      'name': 'TVK Candidate',      'sub_label': 'Tamilaga Vettri Kazhagam',      'icon_bg': 'linear-gradient(135deg,#d97706,#92400e)', 'bar_color': '#f59e0b', 'display_order': 3},
-            {'key': 'ntk',      'name': 'NTK Candidate',      'sub_label': 'Naam Tamilar Katchi',            'icon_bg': 'linear-gradient(135deg,#dc2626,#991b1b)', 'bar_color': '#ef4444', 'display_order': 4},
-        ]
-        for opt in q2_options:
-            PollOption.objects.create(poll=poll, question_no=2, **opt)
-
+        
         self.stdout.write(self.style.SUCCESS(f'Poll seeded: {poll.title} (id={poll.id})'))
         self.stdout.write(f'  Q1 options: {len(q1_options)}')
-        self.stdout.write(f'  Q2 options: {len(q2_options)}')
+        # self.stdout.write(f'  Q2 options: {len(q2_options)}')
