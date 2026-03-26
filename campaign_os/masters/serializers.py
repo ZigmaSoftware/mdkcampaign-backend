@@ -166,7 +166,7 @@ class BoothDetailSerializer(serializers.ModelSerializer):
         validators = []
         fields = [
             'id', 'ward', 'ward_name', 'constituency_name', 'number', 'name', 'code',
-            'block_id', 'address', 'village', 'latitude', 'longitude',
+            'address', 'village', 'latitude', 'longitude',
             'total_voters', 'male_voters', 'female_voters', 'third_gender_voters',
             'total_voters_calculated', 'primary_agent', 'agent_name',
             'primary_volunteer',

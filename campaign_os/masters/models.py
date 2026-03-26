@@ -151,9 +151,6 @@ class Booth(BaseModel):
     name   = models.CharField(max_length=200, null=True, blank=True)
     code   = models.CharField(max_length=5, unique=True)
 
-    # Block identifier
-    block_id  = models.CharField(max_length=20, blank=True, null=True)
-
     # Address and location
     address   = models.TextField(blank=True, null=True)
     village   = models.CharField(max_length=100, blank=True, null=True)
