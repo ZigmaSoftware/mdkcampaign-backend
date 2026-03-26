@@ -31,11 +31,12 @@ class Command(BaseCommand):
             {'key': 'tvk',    'name': 'TVK',                  'name_ta': 'தமிழக வெற்றி கழகம்',        'sub_label': '',                                       'icon_bg': 'linear-gradient(135deg,#d97706,#92400e)', 'bar_color': '#f59e0b', 'is_winner': False, 'display_order': 3},
             {'key': 'ntk',    'name': 'Naam Tamilar Katchi',  'name_ta': 'நாம் தமிழர் கட்சி',         'sub_label': '',                                       'icon_bg': 'linear-gradient(135deg,#dc2626,#991b1b)', 'bar_color': '#ef4444', 'is_winner': False, 'display_order': 4},
             {'key': 'other',  'name': 'Others / வேறு',       'name_ta': 'சுயேட்சை / Independent',     'sub_label': '',                                       'icon_bg': 'linear-gradient(135deg,#4b5563,#374151)', 'bar_color': '#6b7280', 'is_winner': False, 'display_order': 5},
+            {'key': 'nota',   'name': 'NOTA',                 'name_ta': 'மேற்கண்ட யாருமில்லை',        'sub_label': 'None of the Above',                      'icon_bg': 'linear-gradient(135deg,#555,#333)',       'bar_color': '#888888', 'is_winner': False, 'display_order': 6},
         ]
         for opt in q1_options:
             PollOption.objects.create(poll=poll, question_no=1, **opt)
 
         
         self.stdout.write(self.style.SUCCESS(f'Poll seeded: {poll.title} (id={poll.id})'))
-        self.stdout.write(f'  Q1 options: {len(q1_options)}')
+        self.stdout.write(f'  Q1 options: {len(q1_options)} (incl. NOTA)')
         # self.stdout.write(f'  Q2 options: {len(q2_options)}')
