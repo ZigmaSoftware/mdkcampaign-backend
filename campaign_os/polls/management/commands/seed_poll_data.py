@@ -26,11 +26,11 @@ class Command(BaseCommand):
 
         # Q1 - Alliance options
         q1_options = [
-            {'key': 'bjp',    'name': 'ADMK + BJP',          'name_ta': 'பாஜக + அதிமுக கூட்டணி',     'sub_label': '', 'icon_bg': 'linear-gradient(135deg,#FF9933,#e07010)', 'bar_color': '#FF9933', 'is_winner': True,  'display_order': 1},
-            {'key': 'inc',    'name': 'DMK + INC',            'name_ta': 'காங்கிரஸ் + திமுக கூட்டணி', 'sub_label': '',                                       'icon_bg': 'linear-gradient(135deg,#1a56db,#1e40af)', 'bar_color': '#3b82f6', 'is_winner': False, 'display_order': 2},
+            {'key': 'bjp',    'name': 'ADMK + BJP',          'name_ta': 'அதிமுக + பாஜக கூட்டணி',     'sub_label': '', 'icon_bg': 'linear-gradient(135deg,#FF9933,#e07010)', 'bar_color': '#FF9933', 'is_winner': True,  'display_order': 1},
+            {'key': 'dmk',    'name': 'DMK + INC',            'name_ta': 'திமுக + காங்கிரஸ் கூட்டணி', 'sub_label': '',                                       'icon_bg': 'linear-gradient(135deg,#1a56db,#1e40af)', 'bar_color': '#3b82f6', 'is_winner': False, 'display_order': 2},
             {'key': 'tvk',    'name': 'TVK',                  'name_ta': 'தமிழக வெற்றி கழகம்',        'sub_label': '',                                       'icon_bg': 'linear-gradient(135deg,#d97706,#92400e)', 'bar_color': '#f59e0b', 'is_winner': False, 'display_order': 3},
             {'key': 'ntk',    'name': 'Naam Tamilar Katchi',  'name_ta': 'நாம் தமிழர் கட்சி',         'sub_label': '',                                       'icon_bg': 'linear-gradient(135deg,#dc2626,#991b1b)', 'bar_color': '#ef4444', 'is_winner': False, 'display_order': 4},
-            {'key': 'others', 'name': 'Others / வேறு',       'name_ta': 'சுயேட்சை / Independent',     'sub_label': '',                                       'icon_bg': 'linear-gradient(135deg,#4b5563,#374151)', 'bar_color': '#6b7280', 'is_winner': False, 'display_order': 5},
+            {'key': 'other',  'name': 'Others / வேறு',       'name_ta': 'சுயேட்சை / Independent',     'sub_label': '',                                       'icon_bg': 'linear-gradient(135deg,#4b5563,#374151)', 'bar_color': '#6b7280', 'is_winner': False, 'display_order': 5},
         ]
         for opt in q1_options:
             PollOption.objects.create(poll=poll, question_no=1, **opt)
