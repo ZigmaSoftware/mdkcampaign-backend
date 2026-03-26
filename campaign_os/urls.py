@@ -4,6 +4,7 @@ Main URL configuration for campaign_os
 from django.contrib import admin
 from django.urls import path, include
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
+from campaign_os.polls.views import poll_short_redirect
 
 api_v1_patterns = [
     path('auth/', include('campaign_os.accounts.urls')),
@@ -21,7 +22,10 @@ api_v1_patterns = [
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/v1/', include(api_v1_patterns)),
-    
+
+    # Short poll URL: /p/<token>/ → frontend poll page (public, no auth)
+    path('p/<str:token>/', poll_short_redirect, name='poll_short_redirect'),
+
     # API Documentation
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),

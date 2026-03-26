@@ -1,6 +1,7 @@
 """
 Serializers for opinion polls
 """
+from django.conf import settings
 from rest_framework import serializers
 from .models import Poll, PollOption, PollVote
 
@@ -42,6 +43,7 @@ class PollDetailSerializer(serializers.ModelSerializer):
     user_has_voted = serializers.SerializerMethodField()
     user_q1_option = serializers.SerializerMethodField()
     user_q2_option = serializers.SerializerMethodField()
+    short_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Poll
@@ -49,7 +51,18 @@ class PollDetailSerializer(serializers.ModelSerializer):
             'id', 'title', 'title_ta', 'constituency_name', 'constituency_no',
             'is_active', 'starts_at', 'ends_at',
             'options', 'total_votes', 'user_has_voted', 'user_q1_option', 'user_q2_option',
+            'short_url',
         ]
+
+    def get_short_url(self, obj):
+        # Prefer pre-generated is.gd URL; fall back to local short URL
+        if obj.share_url:
+            return obj.share_url
+        base = getattr(settings, 'BACKEND_BASE_URL', None)
+        if not base:
+            request = self.context.get('request')
+            base = request.build_absolute_uri('/').rstrip('/') if request else 'http://localhost:7904'
+        return f'{base}/p/{obj.short_token}/'
 
     def _voter_ip(self):
         request = self.context.get('request')
@@ -72,7 +85,11 @@ class PollDetailSerializer(serializers.ModelSerializer):
         return obj.vote_counts()['total']
 
     def _get_vote(self, obj):
-        """Return the user's vote: by user ID if authenticated, by IP if anonymous"""
+        """Return the user's vote. When device_id is present, only check device — don't fall back to IP."""
+        device_id = (self.context.get('device_id') or '').strip()
+        if device_id:
+            # device_id is the source of truth — if this device hasn't voted, return None
+            return PollVote.objects.filter(poll=obj, voter_device_id=device_id).first()
         request = self.context.get('request')
         if not request:
             return None

@@ -1,12 +1,40 @@
 """
 Views for opinion polls
 """
+import urllib.request
+import urllib.parse
+from django.conf import settings
+from django.http import HttpResponseRedirect, HttpResponseNotFound
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
 from .models import Poll, PollOption, PollVote
 from .serializers import PollDetailSerializer, CastVoteSerializer, PollOptionSerializer
+
+
+def _make_short_url(long_url: str) -> str | None:
+    """Shorten a URL via TinyURL. Returns short URL or None on failure."""
+    try:
+        api = 'https://tinyurl.com/api-create.php?url=' + urllib.parse.quote(long_url, safe='')
+        with urllib.request.urlopen(api, timeout=6) as resp:
+            result = resp.read().decode().strip()
+        if result.startswith('https://tinyurl.com/') or result.startswith('http://tinyurl.com/'):
+            return result
+    except Exception:
+        pass
+    return None
+
+
+def poll_short_redirect(request, token):
+    """Public short URL: /p/<token>/ → frontend poll page (no auth required)."""
+    poll = Poll.objects.filter(short_token=token, is_active=True).first()
+    if not poll:
+        return HttpResponseNotFound('Poll not found or no longer active.')
+    # Derive frontend URL from request host — same host, port 8973
+    host = request.get_host().split(':')[0]   # strip port if present
+    frontend_url = getattr(settings, 'FRONTEND_URL', f'http://{host}:8973')
+    return HttpResponseRedirect(f'{frontend_url}/#poll')
 
 
 def get_client_ip(request):
@@ -32,7 +60,19 @@ class PollViewSet(viewsets.ReadOnlyModelViewSet):
         poll = Poll.objects.filter(is_active=True).first()
         if not poll:
             return Response({'detail': 'No active poll found'}, status=status.HTTP_404_NOT_FOUND)
-        serializer = self.get_serializer(poll)
+
+        # Auto-shorten via TinyURL on first access — use the request's actual host
+        if not poll.share_url:
+            base = request.build_absolute_uri('/').rstrip('/')
+            local_url = f'{base}/p/{poll.short_token}/'
+            shortened = _make_short_url(local_url)
+            if shortened:
+                poll.share_url = shortened
+                poll.save(update_fields=['share_url'])
+
+        ctx = self.get_serializer_context()
+        ctx['device_id'] = request.query_params.get('device_id', '')
+        serializer = PollDetailSerializer(poll, context=ctx)
         return Response(serializer.data)
 
     @action(detail=True, methods=['POST'], url_path='vote', permission_classes=[AllowAny])
@@ -42,15 +82,16 @@ class PollViewSet(viewsets.ReadOnlyModelViewSet):
         if not poll.is_active:
             return Response({'detail': 'This poll is no longer active'}, status=status.HTTP_400_BAD_REQUEST)
 
-        voter_ip = get_client_ip(request)
+        voter_ip    = get_client_ip(request)
+        device_id   = (request.data.get('device_id') or '').strip()[:64]
 
-        # Deduplicate by user when authenticated, by IP when anonymous
-        if request.user.is_authenticated:
-            if PollVote.objects.filter(poll=poll, voter_user=request.user).exists():
-                return Response({'detail': 'already_voted', 'message': 'You have already voted on this poll'}, status=status.HTTP_400_BAD_REQUEST)
-        else:
-            if PollVote.objects.filter(poll=poll, voter_ip=voter_ip).exists():
-                return Response({'detail': 'already_voted', 'message': 'You have already voted on this poll'}, status=status.HTTP_400_BAD_REQUEST)
+        # Deduplicate: device_id (highest priority) → user → IP
+        if device_id and PollVote.objects.filter(poll=poll, voter_device_id=device_id).exists():
+            return Response({'detail': 'already_voted', 'message': 'Already voted from this device'}, status=status.HTTP_400_BAD_REQUEST)
+        if request.user.is_authenticated and PollVote.objects.filter(poll=poll, voter_user=request.user).exists():
+            return Response({'detail': 'already_voted', 'message': 'You have already voted on this poll'}, status=status.HTTP_400_BAD_REQUEST)
+        if not device_id and PollVote.objects.filter(poll=poll, voter_ip=voter_ip).exists():
+            return Response({'detail': 'already_voted', 'message': 'You have already voted on this poll'}, status=status.HTTP_400_BAD_REQUEST)
 
         serializer = CastVoteSerializer(data=request.data, context={'poll': poll, 'request': request})
         serializer.is_valid(raise_exception=True)
@@ -58,6 +99,7 @@ class PollViewSet(viewsets.ReadOnlyModelViewSet):
         PollVote.objects.create(
             poll=poll,
             voter_ip=voter_ip,
+            voter_device_id=device_id,
             voter_user=request.user if request.user.is_authenticated else None,
             voter_name=serializer.validated_data.get('voter_name', ''),
             voter_phone=serializer.validated_data.get('voter_phone', ''),
@@ -66,7 +108,9 @@ class PollViewSet(viewsets.ReadOnlyModelViewSet):
             q2_option_id=serializer.validated_data.get('q2_option'),
         )
 
-        updated = PollDetailSerializer(poll, context={'request': request}).data
+        ctx = self.get_serializer_context()
+        ctx['device_id'] = device_id
+        updated = PollDetailSerializer(poll, context=ctx).data
         return Response(updated, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['GET'], url_path='votes', permission_classes=[IsAuthenticated])
@@ -99,7 +143,10 @@ class PollViewSet(viewsets.ReadOnlyModelViewSet):
         poll = self.get_object()
         voter_ip = get_client_ip(request)
 
-        if request.user.is_authenticated:
+        device_id = (request.data.get('device_id') or '').strip()[:64]
+        if device_id:
+            vote = PollVote.objects.filter(poll=poll, voter_device_id=device_id).first()
+        elif request.user.is_authenticated:
             vote = PollVote.objects.filter(poll=poll, voter_user=request.user).first()
         else:
             vote = PollVote.objects.filter(poll=poll, voter_ip=voter_ip).first()
@@ -112,5 +159,7 @@ class PollViewSet(viewsets.ReadOnlyModelViewSet):
             vote.q2_option_id = q2_id
             vote.save(update_fields=['q2_option'])
 
-        updated = PollDetailSerializer(poll, context={'request': request}).data
+        ctx = self.get_serializer_context()
+        ctx['device_id'] = device_id
+        updated = PollDetailSerializer(poll, context=ctx).data
         return Response(updated)

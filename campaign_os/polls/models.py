@@ -1,9 +1,15 @@
 """
 Opinion poll models
 """
+import secrets
 from django.db import models
 from django.db.models import Count
 from campaign_os.core.models import BaseModel
+
+
+def _make_token():
+    """16-char URL-safe token (96 bits entropy — not guessable)."""
+    return secrets.token_urlsafe(12)
 
 
 class Poll(BaseModel):
@@ -27,6 +33,8 @@ class Poll(BaseModel):
     is_active    = models.BooleanField(default=True, db_index=True)
     starts_at    = models.DateTimeField(null=True, blank=True)
     ends_at      = models.DateTimeField(null=True, blank=True)
+    short_token  = models.CharField(max_length=32, unique=True, default=_make_token, db_index=True)
+    share_url    = models.CharField(max_length=300, blank=True)   # populated by is.gd auto-shortener
 
     class Meta:
         ordering = ['-created_at']
@@ -73,7 +81,8 @@ class PollOption(BaseModel):
 class PollVote(models.Model):
     """One vote cast by a voter (deduplicated by user when authenticated, by IP when anonymous)"""
     poll        = models.ForeignKey(Poll, on_delete=models.CASCADE, related_name='votes', db_constraint=False)
-    voter_ip    = models.GenericIPAddressField()
+    voter_ip        = models.GenericIPAddressField()
+    voter_device_id = models.CharField(max_length=64, blank=True, db_index=True)
     voter_user  = models.ForeignKey(
         'accounts.User', on_delete=models.SET_NULL,
         null=True, blank=True, related_name='poll_votes',

@@ -87,7 +87,7 @@ DATABASES = {
         'ENGINE': 'django.db.backends.mysql',
         'NAME': 'campaign_os',
         'USER': 'root',
-        'PASSWORD': 'Su$i0410',
+        'PASSWORD': 'admin@123',
         'HOST': 'localhost',
         'PORT': '3306',
         'OPTIONS': {
@@ -192,3 +192,7 @@ LOGGING = {
 # Large file upload support
 DATA_UPLOAD_MAX_MEMORY_SIZE = 52428800   # 50 MB
 FILE_UPLOAD_MAX_MEMORY_SIZE = 52428800   # 50 MB
+
+# Frontend URL used for short poll URL redirects (no trailing slash)
+FRONTEND_URL  = config('FRONTEND_URL',  default='http://192.168.1.157.nip.io:8973')
+BACKEND_BASE_URL = config('BACKEND_BASE_URL', default='http://192.168.1.157.nip.io:7904')
