@@ -81,7 +81,7 @@ class PollOption(BaseModel):
 class PollVote(models.Model):
     """One vote cast by a voter (deduplicated by user when authenticated, by IP when anonymous)"""
     poll        = models.ForeignKey(Poll, on_delete=models.CASCADE, related_name='votes', db_constraint=False)
-    voter_ip        = models.GenericIPAddressField()
+    voter_ip        = models.GenericIPAddressField(null=True, blank=True)
     voter_device_id = models.CharField(max_length=64, blank=True, db_index=True)
     voter_user  = models.ForeignKey(
         'accounts.User', on_delete=models.SET_NULL,
@@ -96,8 +96,7 @@ class PollVote(models.Model):
     voted_at    = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        # IP uniqueness handled in view; user uniqueness enforced via unique_together when voter_user is set
-        unique_together = ['poll', 'voter_ip']  # one vote per IP per poll (anonymous fallback)
+        pass  # deduplication enforced in the view (device_id → user → IP)
 
     def __str__(self):
         identifier = self.voter_user.username if self.voter_user else self.voter_ip
