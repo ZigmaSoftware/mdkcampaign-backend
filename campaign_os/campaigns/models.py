@@ -63,8 +63,8 @@ class CampaignEvent(BaseModel):
     materials_prepared = models.TextField(blank=True, null=True)
 
     # Feedback
-    outcome_notes = models.TextField(blank=True, null=True)
-    success_score = models.IntegerField(null=True, blank=True)
+    outcome_notes      = models.TextField(blank=True, null=True)
+    special_guest_name = models.CharField(max_length=200, blank=True, null=True)
 
     class Meta:
         ordering = ['scheduled_date']

@@ -27,7 +27,7 @@ class CampaignEventSerializer(serializers.ModelSerializer):
             'organized_by', 'organizer_name',
             'scheduled_date', 'scheduled_time', 'location',
             'expected_attendees', 'actual_attendees', 'status',
-            'materials_prepared', 'outcome_notes', 'success_score',
+            'materials_prepared', 'outcome_notes', 'special_guest_name',
             'attendee_count', 'is_active', 'created_at', 'updated_at',
         ]
 

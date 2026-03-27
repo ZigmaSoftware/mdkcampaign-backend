@@ -1,6 +1,7 @@
 """
 Views for campaigns and events
 """
+from django.http import HttpResponse
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -100,6 +101,89 @@ class TaskViewSet(viewsets.ModelViewSet):
     def perform_destroy(self, instance):
         instance.is_active = False
         instance.save()
+
+    @action(detail=False, methods=['GET'], url_path='export')
+    def export(self, request):
+        """
+        GET /api/v1/campaigns/tasks/export/
+        Returns tasks as a printable HTML table.
+        Supports the same filters: ?status=pending&category=logistics
+        Add ?download=1 to force file download instead of browser render.
+        """
+        qs = self.filter_queryset(self.get_queryset())
+
+        def user_name(u):
+            return (u.get_full_name() or u.username) if u else '—'
+
+        def fmt_dt(dt):
+            return dt.strftime('%Y-%m-%d %H:%M') if dt else '—'
+
+        headers = [
+            'S.No',
+            'Task Title',
+            'Task Category',
+            'Details',
+            'Expected Delivery Date & Time',
+            'Venue',
+            'Delivery Incharge',
+            'Coordinator',
+            'Qty',
+            'Status',
+            'Completed Date & Time',
+            'Notes',
+        ]
+
+        rows = []
+        for idx, task in enumerate(qs, start=1):
+            rows.append([
+                idx,
+                task.title or '—',
+                task.get_category_display() if task.category else '—',
+                task.details or '—',
+                fmt_dt(task.expected_datetime),
+                task.venue or '—',
+                user_name(task.delivery_incharge),
+                user_name(task.coordinator),
+                task.qty if task.qty is not None else '—',
+                task.get_status_display() if task.status else '—',
+                fmt_dt(task.completed_datetime),
+                task.notes or '—',
+            ])
+
+        th_cells = ''.join(f'<th>{h}</th>' for h in headers)
+
+        td_rows = ''
+        for row in rows:
+            cells = ''.join(f'<td>{cell}</td>' for cell in row)
+            td_rows += f'<tr>{cells}</tr>\n'
+
+        html = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Task Management Export</title>
+  <style>
+    body {{ font-family: Arial, sans-serif; font-size: 13px; margin: 20px; }}
+    h2   {{ margin-bottom: 12px; }}
+    table {{ border-collapse: collapse; width: 100%; }}
+    th, td {{ border: 1px solid #ccc; padding: 8px 10px; text-align: left; white-space: nowrap; }}
+    th {{ background: #4a6fa5; color: #fff; }}
+    tr:nth-child(even) {{ background: #f5f7fa; }}
+  </style>
+</head>
+<body>
+  <h2>Task Management</h2>
+  <table>
+    <thead><tr>{th_cells}</tr></thead>
+    <tbody>{td_rows}</tbody>
+  </table>
+</body>
+</html>"""
+
+        response = HttpResponse(html, content_type='text/html; charset=utf-8')
+        if request.query_params.get('download'):
+            response['Content-Disposition'] = 'attachment; filename="tasks.html"'
+        return response
 
 
 class EventAttendeeViewSet(viewsets.ModelViewSet):
