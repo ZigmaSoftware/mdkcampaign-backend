@@ -4,7 +4,7 @@ Serializers for master data
 from rest_framework import serializers
 from campaign_os.masters.models import (
     Country, State, District, Constituency, Ward, Booth, PollingArea,
-    Candidate, Party, Scheme, Issue, Achievement
+    Candidate, Party, Scheme, Issue, Achievement, TaskCategory
 )
 from django.contrib.auth import get_user_model
 
@@ -276,6 +276,13 @@ class IssueSerializer(serializers.ModelSerializer):
             'id', 'name', 'description', 'category', 'priority',
             'created_at', 'updated_at'
         ]
+
+
+class TaskCategorySerializer(serializers.ModelSerializer):
+    """Task Category master"""
+    class Meta:
+        model = TaskCategory
+        fields = ['id', 'name', 'description', 'color', 'icon', 'priority', 'created_at', 'updated_at']
 
 
 class AchievementSerializer(serializers.ModelSerializer):

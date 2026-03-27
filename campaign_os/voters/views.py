@@ -87,7 +87,10 @@ class VoterViewSet(viewsets.ModelViewSet):
             return Response({'detail': err}, status=status.HTTP_400_BAD_REQUEST)
 
         # Build booth/ward lookup maps once (avoid per-row DB hits)
-        booth_map = {b.code: b.id for b in Booth.objects.only('id', 'code')}
+        # Primary lookup by code; secondary by number (CSV may contain numeric booth numbers)
+        booths = list(Booth.objects.only('id', 'code', 'number'))
+        booth_map = {b.code: b.id for b in booths}
+        booth_num_map = {b.number: b.id for b in booths if b.number}
         ward_map  = {w.code: w.id for w in Ward.objects.only('id', 'code')}
 
         # Find existing voter_ids to skip duplicates
@@ -115,6 +118,10 @@ class VoterViewSet(viewsets.ModelViewSet):
             try:
                 bc = to_str(row.get('booth_code', ''))
                 wc = to_str(row.get('ward_code', ''))
+                booth_id = booth_map.get(bc) or booth_num_map.get(bc)
+                if bc and not booth_id:
+                    result.fail(i, f'booth_code "{bc}" not found in master — import the booth first')
+                    continue
                 batch.append(Voter(
                     voter_id       = voter_id,
                     name           = to_str(row.get('name')),
@@ -126,7 +133,7 @@ class VoterViewSet(viewsets.ModelViewSet):
                     phone2         = to_str(row.get('alt_phone') or row.get('phone2')) or None,
                     email          = to_str(row.get('email')) or None,
                     address        = to_str(row.get('address')) or None,
-                    booth_id       = booth_map.get(bc),
+                    booth_id       = booth_id,
                     village_id     = ward_map.get(wc),
                     religion       = to_str(row.get('religion')) or None,
                     caste          = to_str(row.get('caste')) or None,

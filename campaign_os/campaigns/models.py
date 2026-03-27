@@ -147,6 +147,10 @@ class Task(BaseModel):
 
     title             = models.CharField(max_length=200, null=True, blank=True)
     category          = models.CharField(max_length=30, choices=CATEGORY_CHOICES, default='other', null=True, blank=True)
+    task_category     = models.ForeignKey(
+        'masters.TaskCategory', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='tasks', db_constraint=False,
+    )
     details           = models.TextField(blank=True, null=True)
     expected_datetime = models.DateTimeField(null=True, blank=True)
     venue             = models.CharField(max_length=300, blank=True, null=True)

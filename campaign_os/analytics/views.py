@@ -54,14 +54,14 @@ class AnalyticsViewSet(viewsets.ViewSet):
         """Get booth-wise statistics using actual voter record counts"""
         constituency_id = request.query_params.get('constituency_id')
 
-        booths = Booth.objects.filter(is_active=True)
+        booths = Booth.objects.filter(is_active=True).select_related('ward', 'ward__constituency')
         if constituency_id:
             booths = booths.filter(ward__constituency_id=constituency_id)
 
         booths = booths.annotate(
             actual_total=Count('voters', filter=Q(voters__is_active=True), distinct=True),
             actual_contacted=Count('voters', filter=Q(voters__is_active=True, voters__is_contacted=True), distinct=True),
-        )
+        ).order_by('number')
 
         stats = []
         for b in booths:
@@ -71,6 +71,8 @@ class AnalyticsViewSet(viewsets.ViewSet):
                 'id': b.id,
                 'name': b.name,
                 'number': b.number,
+                'ward_name': b.ward.name if b.ward_id else None,
+                'constituency_name': b.ward.constituency.name if b.ward_id and b.ward.constituency_id else None,
                 'total_voters': total,
                 'voters_contacted': contacted,
                 'coverage_percentage': round(contacted * 100 / total, 1) if total > 0 else 0,

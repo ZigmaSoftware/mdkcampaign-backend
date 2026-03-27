@@ -83,14 +83,24 @@ class CampaignEventViewSet(viewsets.ModelViewSet):
 
 class TaskViewSet(viewsets.ModelViewSet):
     queryset = Task.objects.filter(is_active=True).select_related(
-        'delivery_incharge', 'coordinator'
+        'delivery_incharge', 'coordinator', 'task_category'
     )
     serializer_class = TaskSerializer
     permission_classes = [permissions.IsAuthenticated]
-    filterset_fields = ['status', 'category']
+    filterset_fields = ['status', 'category', 'task_category']
     search_fields = ['title', 'venue']
     ordering_fields = ['expected_datetime', 'created_at']
     ordering = ['expected_datetime']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        date_from = self.request.query_params.get('date_from')
+        date_to   = self.request.query_params.get('date_to')
+        if date_from:
+            qs = qs.filter(expected_datetime__date__gte=date_from)
+        if date_to:
+            qs = qs.filter(expected_datetime__date__lte=date_to)
+        return qs
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
@@ -138,7 +148,7 @@ class TaskViewSet(viewsets.ModelViewSet):
             rows.append([
                 idx,
                 task.title or '—',
-                task.get_category_display() if task.category else '—',
+                task.task_category.name if task.task_category_id else (task.get_category_display() if task.category else '—'),
                 task.details or '—',
                 fmt_dt(task.expected_datetime),
                 task.venue or '—',

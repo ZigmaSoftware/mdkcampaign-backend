@@ -43,12 +43,15 @@ class CampaignEventSerializer(serializers.ModelSerializer):
 class TaskSerializer(serializers.ModelSerializer):
     delivery_incharge_name = serializers.SerializerMethodField()
     coordinator_name       = serializers.SerializerMethodField()
+    task_category_name     = serializers.CharField(source='task_category.name', read_only=True)
+    task_category_color    = serializers.CharField(source='task_category.color', read_only=True)
 
     class Meta:
         model = Task
         fields = [
-            'id', 'title', 'category', 'details',
-            'expected_datetime', 'venue',
+            'id', 'title', 'category',
+            'task_category', 'task_category_name', 'task_category_color',
+            'details', 'expected_datetime', 'venue',
             'delivery_incharge', 'delivery_incharge_name',
             'coordinator', 'coordinator_name',
             'qty', 'status', 'completed_datetime', 'notes',

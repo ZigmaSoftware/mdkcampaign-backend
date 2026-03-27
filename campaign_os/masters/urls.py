@@ -17,6 +17,7 @@ router.register(r'parties', views.PartyViewSet, basename='party')
 router.register(r'candidates', views.CandidateViewSet, basename='candidate')
 router.register(r'schemes', views.SchemeViewSet, basename='scheme')
 router.register(r'achievements', views.AchievementViewSet, basename='achievement')
+router.register(r'task-categories', views.TaskCategoryViewSet, basename='task_category')
 
 urlpatterns = [
     path('', include(router.urls)),

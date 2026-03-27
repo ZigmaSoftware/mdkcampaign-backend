@@ -357,6 +357,22 @@ class Issue(BaseModel):
         return self.name
 
 
+class TaskCategory(BaseModel):
+    """Task Category master — used by campaign tasks"""
+    name        = models.CharField(max_length=100, unique=True)
+    description = models.TextField(blank=True, null=True)
+    color       = models.CharField(max_length=7, blank=True, null=True, help_text='Hex colour e.g. #FF9933')
+    icon        = models.CharField(max_length=60, blank=True, null=True, help_text='Phosphor icon class e.g. ph-truck')
+    priority    = models.IntegerField(default=0, null=True, blank=True)
+
+    class Meta:
+        verbose_name_plural = 'Task Categories'
+        ordering = ['priority', 'name']
+
+    def __str__(self):
+        return self.name
+
+
 class Achievement(BaseModel):
     """Campaign Achievement"""
     name        = models.CharField(max_length=200, null=True, blank=True)

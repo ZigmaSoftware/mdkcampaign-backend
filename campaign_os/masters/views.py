@@ -10,7 +10,7 @@ from django.db.models import Count, Q, IntegerField
 from django.db.models.functions import Cast
 from campaign_os.masters.models import (
     Country, State, District, Constituency, Ward, Booth, PollingArea,
-    Candidate, Party, Scheme, Issue, Achievement
+    Candidate, Party, Scheme, Issue, Achievement, TaskCategory
 )
 from campaign_os.masters.serializers import (
     CountrySerializer, StateSerializer, DistrictSimpleSerializer, DistrictDetailSerializer,
@@ -18,7 +18,7 @@ from campaign_os.masters.serializers import (
     WardSimpleSerializer, WardDetailSerializer,
     BoothSimpleSerializer, BoothDetailSerializer, PollingAreaSerializer,
     PartySerializer, CandidateDetailSerializer, CandidateSimpleSerializer,
-    SchemeSerializer, IssueSerializer, AchievementSerializer
+    SchemeSerializer, IssueSerializer, AchievementSerializer, TaskCategorySerializer
 )
 from campaign_os.core.utils.bulk_upload import (
     parse_upload, BulkResult, resolve_by_code, to_int, to_str, to_bool
@@ -414,3 +414,22 @@ class AchievementViewSet(viewsets.ModelViewSet):
     filterset_fields = ['ward', 'booth']
     search_fields = ['name', 'description']
     ordering = ['-created_at']
+
+
+
+class TaskCategoryViewSet(viewsets.ModelViewSet):
+    queryset = TaskCategory.objects.filter(is_active=True)
+    serializer_class = TaskCategorySerializer
+    permission_classes = [permissions.IsAuthenticated]
+    search_fields = ['name']
+    ordering = ['priority', 'name']
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+    def perform_update(self, serializer):
+        serializer.save(updated_by=self.request.user)
+
+    def perform_destroy(self, instance):
+        instance.is_active = False
+        instance.save()

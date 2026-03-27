@@ -4,7 +4,7 @@ Run with: python manage.py seed_initial_data
 """
 from django.core.management.base import BaseCommand
 from campaign_os.masters.models import (
-    Country, State, District, Constituency, Ward, Booth, Party, Scheme, Issue
+    Country, State, District, Constituency, Ward, Booth, Party, Scheme, Issue, TaskCategory
 )
 
 
@@ -163,6 +163,31 @@ class Command(BaseCommand):
         for i in issues:
             Issue.objects.get_or_create(name=i['name'], defaults=i)
         self.stdout.write(f'  Issues: {len(issues)} issues seeded')
+
+        # ── Task Categories ───────────────────────────────────────────
+        task_categories = [
+            {'name': 'Material Preparation', 'color': '#7c3aed', 'icon': 'ph-package',           'priority': 1,  'description': 'Preparing banners, pamphlets, and campaign materials'},
+            {'name': 'Distribution',          'color': '#ea580c', 'icon': 'ph-truck',              'priority': 2,  'description': 'Distributing materials, gifts, or items to voters'},
+            {'name': 'Event Coordination',    'color': '#0d9488', 'icon': 'ph-calendar-star',      'priority': 3,  'description': 'Planning and managing campaign events and rallies'},
+            {'name': 'Voter Outreach',        'color': '#2563eb', 'icon': 'ph-handshake',          'priority': 4,  'description': 'Door-to-door canvassing and direct voter contact'},
+            {'name': 'Social Media',          'color': '#db2777', 'icon': 'ph-share-network',      'priority': 5,  'description': 'Managing social media posts, reels, and campaigns'},
+            {'name': 'Logistics',             'color': '#b45309', 'icon': 'ph-van',                'priority': 6,  'description': 'Transport, vehicles, and logistics arrangements'},
+            {'name': 'Communication',         'color': '#0891b2', 'icon': 'ph-chat-circle-dots',   'priority': 7,  'description': 'Phone banking, WhatsApp, and communication tasks'},
+            {'name': 'Data Entry',            'color': '#475569', 'icon': 'ph-database',           'priority': 8,  'description': 'Entering voter data, survey results, and records'},
+            {'name': 'Finance',               'color': '#16a34a', 'icon': 'ph-currency-inr',       'priority': 9,  'description': 'Budget tracking, expense management, and finance tasks'},
+            {'name': 'Booth Management',      'color': '#dc2626', 'icon': 'ph-map-pin',            'priority': 10, 'description': 'Booth-level coordination and agent management'},
+            {'name': 'Volunteer Coordination','color': '#9333ea', 'icon': 'ph-users-three',        'priority': 11, 'description': 'Organising and managing campaign volunteers'},
+            {'name': 'Other',                 'color': '#6b7280', 'icon': 'ph-dots-three-outline', 'priority': 99, 'description': 'Miscellaneous tasks not covered by other categories'},
+        ]
+        created_cats = 0
+        for cat in task_categories:
+            _, created = TaskCategory.objects.get_or_create(
+                name=cat['name'],
+                defaults={k: v for k, v in cat.items() if k != 'name'},
+            )
+            if created:
+                created_cats += 1
+        self.stdout.write(f'  Task Categories: {len(task_categories)} total, {created_cats} newly created')
 
         total_voters = sum(b['total_voters'] for b in booth_data)
         self.stdout.write(self.style.SUCCESS(
