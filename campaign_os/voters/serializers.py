@@ -25,7 +25,7 @@ class VoterSerializer(serializers.ModelSerializer):
         model = Voter
         fields = [
             'id', 'name', 'father_name', 'date_of_birth', 'gender', 'age',
-            'voter_id', 'aadhaar', 'phone', 'phone2', 'email', 'booth', 'booth_name',
+            'voter_id', 'aadhaar', 'phone', 'phone2', 'alt_phoneno2', 'alt_phoneno3', 'email', 'booth', 'booth_name',
             'village', 'village_name', 'address', 'latitude', 'longitude',
             'religion', 'caste', 'sub_caste', 'current_location', 'scheme_name', 'issue_name',
             'education_level', 'occupation', 'sentiment', 'preferred_party',

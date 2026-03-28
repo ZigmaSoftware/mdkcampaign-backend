@@ -21,6 +21,8 @@ class Voter(BaseModel):
     aadhaar  = models.CharField(max_length=12, unique=True, null=True, blank=True)
     phone    = models.CharField(max_length=20, null=True, blank=True, db_index=True)
     phone2   = models.CharField(max_length=20, blank=True, null=True)
+    alt_phoneno2 = models.CharField(max_length=20, blank=True, null=True)
+    alt_phoneno3 = models.CharField(max_length=20, blank=True, null=True)
     email    = models.EmailField(null=True, blank=True)
 
     # Location
