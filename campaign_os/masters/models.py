@@ -373,6 +373,28 @@ class TaskCategory(BaseModel):
         return self.name
 
 
+class CampaignActivityType(BaseModel):
+    """Master list of campaign activity types shown in the Campaign Activity dropdown"""
+    EVENT_TYPE_CHOICES = [
+        ('rally',     'Rally'),
+        ('meeting',   'Meeting'),
+        ('door_door', 'Door-to-Door'),
+        ('training',  'Training / Digital'),
+    ]
+    name       = models.CharField(max_length=200, unique=True)
+    event_type = models.CharField(max_length=20, choices=EVENT_TYPE_CHOICES, default='meeting')
+    description = models.TextField(blank=True, null=True)
+    order       = models.IntegerField(default=0)
+    is_active   = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['order', 'name']
+        verbose_name_plural = 'Campaign Activity Types'
+
+    def __str__(self):
+        return self.name
+
+
 class Achievement(BaseModel):
     """Campaign Achievement"""
     name        = models.CharField(max_length=200, null=True, blank=True)

@@ -18,6 +18,7 @@ router.register(r'candidates', views.CandidateViewSet, basename='candidate')
 router.register(r'schemes', views.SchemeViewSet, basename='scheme')
 router.register(r'achievements', views.AchievementViewSet, basename='achievement')
 router.register(r'task-categories', views.TaskCategoryViewSet, basename='task_category')
+router.register(r'campaign-activity-types', views.CampaignActivityTypeViewSet, basename='campaign_activity_type')
 
 urlpatterns = [
     path('', include(router.urls)),

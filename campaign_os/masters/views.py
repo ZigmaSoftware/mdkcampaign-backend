@@ -10,7 +10,7 @@ from django.db.models import Count, Q, IntegerField
 from django.db.models.functions import Cast
 from campaign_os.masters.models import (
     Country, State, District, Constituency, Ward, Booth, PollingArea,
-    Candidate, Party, Scheme, Issue, Achievement, TaskCategory
+    Candidate, Party, Scheme, Issue, Achievement, TaskCategory, CampaignActivityType
 )
 from campaign_os.masters.serializers import (
     CountrySerializer, StateSerializer, DistrictSimpleSerializer, DistrictDetailSerializer,
@@ -18,7 +18,8 @@ from campaign_os.masters.serializers import (
     WardSimpleSerializer, WardDetailSerializer,
     BoothSimpleSerializer, BoothDetailSerializer, PollingAreaSerializer,
     PartySerializer, CandidateDetailSerializer, CandidateSimpleSerializer,
-    SchemeSerializer, IssueSerializer, AchievementSerializer, TaskCategorySerializer
+    SchemeSerializer, IssueSerializer, AchievementSerializer, TaskCategorySerializer,
+    CampaignActivityTypeSerializer
 )
 from campaign_os.core.utils.bulk_upload import (
     parse_upload, BulkResult, resolve_by_code, to_int, to_str, to_bool
@@ -433,3 +434,13 @@ class TaskCategoryViewSet(viewsets.ModelViewSet):
     def perform_destroy(self, instance):
         instance.is_active = False
         instance.save()
+
+
+class CampaignActivityTypeViewSet(viewsets.ModelViewSet):
+    """Campaign Activity Type master — drives the activity dropdown in Campaign Entry"""
+    queryset = CampaignActivityType.objects.all().order_by('order', 'name')
+    serializer_class = CampaignActivityTypeSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [filters.SearchFilter, DjangoFilterBackend]
+    search_fields = ['name']
+    filterset_fields = ['event_type', 'is_active']
