@@ -50,18 +50,14 @@ class FieldSurvey(BaseModel):
         ('Other',  'Other'),
     ]
     SUPPORT_CHOICES = [
-        ('Strong Support',   'Strong Support'),
-        ('Leaning Support',  'Leaning Support'),
-        ('Neutral',          'Neutral'),
-        ('Leaning Against',  'Leaning Against'),
-        ('Strong Against',   'Strong Against'),
-        ('Undecided',        'Undecided'),
+        ('positive', 'Positive'),
+        ('negative', 'Negative'),
+        ('neutral',  'Neutral'),
     ]
     RESPONSE_STATUS_CHOICES = [
-        ('interested',      'Interested'),
-        ('not_reach',       'Not Reach'),
-        ('not_attend_call', 'Not Attend the Call'),
-        ('need_followups',  'Need Followups'),
+        ('not_reach',    'Not Reach'),
+        ('no_answer',    'No Answer'),
+        ('need_followup', 'Need Followup'),
     ]
 
     survey_date         = models.DateField(db_index=True)

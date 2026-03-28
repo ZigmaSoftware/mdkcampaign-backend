@@ -18,9 +18,26 @@ class VoterViewSet(viewsets.ModelViewSet):
     """Voter management"""
     queryset = Voter.objects.filter(is_active=True).prefetch_related('booth', 'village', 'preferred_party')
     permission_classes = [permissions.IsAuthenticated]
-    filterset_fields = ['booth', 'village', 'sentiment', 'is_contacted', 'gender']
+    filterset_fields = ['village', 'sentiment', 'is_contacted', 'gender']
     search_fields = ['name', 'voter_id', 'phone']
     serializer_class = VoterSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+
+        # Support comma-separated booth IDs: ?booth=1,2,3
+        booth_param = self.request.query_params.get('booth', '')
+        if booth_param:
+            booth_ids = [b.strip() for b in booth_param.split(',') if b.strip().isdigit()]
+            if booth_ids:
+                qs = qs.filter(booth_id__in=booth_ids)
+
+        # Support date filter on created_at: ?created_date=2026-03-28
+        created_date = self.request.query_params.get('created_date', '')
+        if created_date:
+            qs = qs.filter(created_at__date=created_date)
+
+        return qs
 
     @action(detail=False, methods=['GET'])
     def by_booth(self, request):

@@ -20,6 +20,11 @@ class Volunteer(BaseModel):
         'masters.Booth', on_delete=models.SET_NULL, null=True, blank=True,
         related_name='volunteers', db_constraint=False
     )
+    booths = models.ManyToManyField(
+        'masters.Booth',
+        blank=True,
+        related_name='assigned_volunteers',
+    )
     ward = models.ForeignKey(
         'masters.Ward', on_delete=models.SET_NULL, null=True, blank=True,
         related_name='volunteers', db_constraint=False

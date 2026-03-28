@@ -3,13 +3,18 @@ Serializers for volunteer management
 """
 from rest_framework import serializers
 from campaign_os.volunteers.models import Volunteer, VolunteerTask, VolunteerAttendance
+from campaign_os.masters.models import Booth
 
 
 class VolunteerSerializer(serializers.ModelSerializer):
-    user_name  = serializers.SerializerMethodField()
-    booth_name = serializers.CharField(source='booth.name', read_only=True)
-    username   = serializers.SerializerMethodField()
-    phone      = serializers.SerializerMethodField()
+    user_name   = serializers.SerializerMethodField()
+    booth_name  = serializers.CharField(source='booth.name', read_only=True)
+    username    = serializers.SerializerMethodField()
+    phone       = serializers.SerializerMethodField()
+    booths      = serializers.PrimaryKeyRelatedField(
+        many=True, queryset=Booth.objects.all(), required=False
+    )
+    booth_names = serializers.SerializerMethodField()
 
     def get_user_name(self, obj):
         if obj.name:
@@ -24,11 +29,28 @@ class VolunteerSerializer(serializers.ModelSerializer):
     def get_phone(self, obj):
         return obj.phone or (getattr(obj.user, 'phone', '') if obj.user_id else '')
 
+    def get_booth_names(self, obj):
+        return list(obj.booths.values_list('name', flat=True))
+
+    def create(self, validated_data):
+        booths = validated_data.pop('booths', [])
+        instance = super().create(validated_data)
+        if booths:
+            instance.booths.set(booths)
+        return instance
+
+    def update(self, instance, validated_data):
+        booths = validated_data.pop('booths', None)
+        instance = super().update(instance, validated_data)
+        if booths is not None:
+            instance.booths.set(booths)
+        return instance
+
     class Meta:
         model = Volunteer
         fields = [
             'id', 'user', 'user_name', 'username', 'name', 'phone',
-            'booth', 'booth_name', 'ward', 'block',
+            'booth', 'booth_name', 'booths', 'booth_names', 'ward', 'block',
             'status', 'volunteer_type', 'role', 'age', 'gender', 'joined_date',
             'source', 'skills', 'vehicle', 'notes', 'phone2',
             'experience_months', 'previous_campaigns',

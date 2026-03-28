@@ -73,15 +73,20 @@ class VolunteerViewSet(viewsets.ModelViewSet):
                 result.fail(i, 'name is required')
                 continue
             try:
-                booth_id = resolve_by_code(Booth, row.get('booth_code', ''))
-                ward_id  = resolve_by_code(Ward,  row.get('ward_code',  ''))
+                ward_id = resolve_by_code(Ward, row.get('ward_code', ''))
 
-                _, created = Volunteer.objects.get_or_create(
+                # Parse comma-separated booth codes e.g. "1, 2, 3" or "B001,B002"
+                raw_codes = to_str(row.get('booth_code', '')) or ''
+                booth_codes = [bc.strip() for bc in raw_codes.split(',') if bc.strip()]
+                booth_ids = [bid for bc in booth_codes if (bid := resolve_by_code(Booth, bc))]
+                primary_booth_id = booth_ids[0] if booth_ids else None
+
+                vol, created = Volunteer.objects.get_or_create(
                     name=name,
                     defaults={
                         'phone':          to_str(row.get('phone'))           or None,
                         'phone2':         to_str(row.get('alt_phone'))       or None,
-                        'booth_id':       booth_id,
+                        'booth_id':       primary_booth_id,
                         'ward_id':        ward_id,
                         'volunteer_type': to_str(row.get('volunteer_type')) or None,
                         'role':           to_str(row.get('role'))           or None,
@@ -93,6 +98,8 @@ class VolunteerViewSet(viewsets.ModelViewSet):
                         'status':         to_str(row.get('status'))         or 'active',
                     }
                 )
+                if booth_ids:
+                    vol.booths.set(booth_ids)
                 result.ok(created)
             except Exception as exc:
                 result.fail(i, str(exc))

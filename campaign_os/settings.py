@@ -45,7 +45,8 @@ INSTALLED_APPS = [
     'campaign_os.activities',
     'campaign_os.attendance',
     'campaign_os.polls',
-    
+    'campaign_os.telecalling',
+
 ]
 
 MIDDLEWARE = [
