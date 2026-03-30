@@ -84,6 +84,12 @@ class FieldSurvey(BaseModel):
         max_length=20, choices=RESPONSE_STATUS_CHOICES, blank=True
     )
 
+    # Link to actual voter record (optional — populated when survey is created via telecalling)
+    voter = models.ForeignKey(
+        'voters.Voter', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='field_surveys', db_constraint=False
+    )
+
     # Who surveyed
     surveyed_by         = models.CharField(max_length=150, blank=True)
 

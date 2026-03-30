@@ -34,11 +34,6 @@ class Voter(BaseModel):
         'masters.Ward', on_delete=models.SET_NULL, null=True, blank=True,
         related_name='voters', db_constraint=False
     )
-    panchayat = models.ForeignKey(
-        'masters.Panchayat', on_delete=models.SET_NULL, null=True, blank=True,
-        related_name='voters', db_constraint=False
-    )
-
     # Address details
     address   = models.TextField(null=True, blank=True)
     pincode   = models.CharField(max_length=10, blank=True, null=True)

@@ -21,7 +21,6 @@ class VoterViewSet(viewsets.ModelViewSet):
     queryset = Voter.objects.filter(is_active=True).prefetch_related('booth', 'village', 'preferred_party')
     permission_classes = [permissions.IsAuthenticated, ScreenPermission]
     filterset_fields = ['village', 'sentiment', 'is_contacted', 'gender', 'pincode']
-    search_fields = ['name', 'voter_id', 'phone']
     serializer_class = VoterSerializer
 
     def get_queryset(self):
@@ -43,6 +42,24 @@ class VoterViewSet(viewsets.ModelViewSet):
         created_date = self.request.query_params.get('created_date', '')
         if created_date:
             qs = qs.filter(created_at__date=created_date)
+
+        # Full-text search across all identifiable fields
+        search = self.request.query_params.get('search', '').strip()
+        if search:
+            q = (
+                Q(name__icontains=search) |
+                Q(voter_id__icontains=search) |
+                Q(phone__icontains=search) |
+                Q(phone2__icontains=search) |
+                Q(alt_phoneno2__icontains=search) |
+                Q(alt_phoneno3__icontains=search) |
+                Q(aadhaar__icontains=search) |
+                Q(father_name__icontains=search) |
+                Q(address__icontains=search)
+            )
+            if search.isdigit():
+                q |= Q(age=int(search))
+            qs = qs.filter(q)
 
         return qs
 
@@ -104,7 +121,7 @@ class VoterViewSet(viewsets.ModelViewSet):
           religion, caste, sub_caste, sentiment, education_level, occupation,
           scheme_name, issue_name, notes
         """
-        from campaign_os.masters.models import Booth, Ward, Panchayat
+        from campaign_os.masters.models import Booth, Ward
 
         rows, err = parse_upload(request)
         if err:
@@ -116,7 +133,6 @@ class VoterViewSet(viewsets.ModelViewSet):
         booth_map = {b.code: b.id for b in booths}
         booth_num_map = {b.number: b.id for b in booths if b.number}
         ward_map      = {w.code: w.id for w in Ward.objects.only('id', 'code')}
-        panchayat_map = {p.code: p.id for p in Panchayat.objects.only('id', 'code') if p.code}
 
         # Find existing voter_ids to skip duplicates
         all_ids = []
@@ -147,7 +163,6 @@ class VoterViewSet(viewsets.ModelViewSet):
                 if bc and not booth_id:
                     result.fail(i, f'booth_code "{bc}" not found in master — import the booth first')
                     continue
-                pc = to_str(row.get('panchayat_code', ''))
                 batch.append(Voter(
                     voter_id       = voter_id,
                     name           = to_str(row.get('name')),
@@ -163,7 +178,6 @@ class VoterViewSet(viewsets.ModelViewSet):
                     address        = to_str(row.get('address')) or None,
                     booth_id       = booth_id,
                     village_id     = ward_map.get(wc),
-                    panchayat_id   = panchayat_map.get(pc) if pc else None,
                     religion       = to_str(row.get('religion')) or None,
                     caste          = to_str(row.get('caste')) or None,
                     sub_caste      = to_str(row.get('sub_caste')) or None,

@@ -4,6 +4,38 @@ from .serializers import ActivityLogSerializer, FieldSurveySerializer
 from campaign_os.core.permissions import ScreenPermission
 
 
+def _sync_voter_from_survey(instance):
+    """Push support_level → voter.sentiment and party_preference → voter.preferred_party."""
+    voter = instance.voter
+    if not voter:
+        return
+
+    changed = False
+
+    if instance.support_level:
+        voter.sentiment = instance.support_level   # values match: positive/negative/neutral
+        changed = True
+
+    if instance.party_preference:
+        from campaign_os.masters.models import Party
+        party = Party.objects.filter(
+            is_active=True
+        ).filter(
+            name__iexact=instance.party_preference
+        ).first()
+        if party:
+            voter.preferred_party = party
+            changed = True
+
+    if changed:
+        fields_to_save = []
+        if instance.support_level:
+            fields_to_save.append('sentiment')
+        if instance.party_preference:
+            fields_to_save.append('preferred_party_id')
+        voter.save(update_fields=fields_to_save)
+
+
 class ActivityLogViewSet(viewsets.ModelViewSet):
     screen_slug = 'agent-activity'
     queryset = ActivityLog.objects.filter(is_active=True)
@@ -33,13 +65,15 @@ class FieldSurveyViewSet(viewsets.ModelViewSet):
     filterset_fields = ['survey_date', 'block', 'support_level', 'surveyed_by']
 
     def perform_create(self, serializer):
-        serializer.save(
+        instance = serializer.save(
             created_by=self.request.user,
             surveyed_by=serializer.validated_data.get('surveyed_by') or self.request.user.username,
         )
+        _sync_voter_from_survey(instance)
 
     def perform_update(self, serializer):
-        serializer.save(updated_by=self.request.user)
+        instance = serializer.save(updated_by=self.request.user)
+        _sync_voter_from_survey(instance)
 
     def perform_destroy(self, instance):
         instance.is_active = False

@@ -7,14 +7,16 @@ from campaign_os.masters.models import Booth
 
 
 class VolunteerSerializer(serializers.ModelSerializer):
-    user_name   = serializers.SerializerMethodField()
-    booth_name  = serializers.CharField(source='booth.name', read_only=True)
-    username    = serializers.SerializerMethodField()
-    phone       = serializers.CharField(max_length=20, required=False, allow_blank=True, allow_null=True)
-    booths      = serializers.PrimaryKeyRelatedField(
+    user_name      = serializers.SerializerMethodField()
+    booth_name     = serializers.CharField(source='booth.name', read_only=True)
+    username       = serializers.SerializerMethodField()
+    phone          = serializers.CharField(max_length=20, required=False, allow_blank=True, allow_null=True)
+    booths         = serializers.PrimaryKeyRelatedField(
         many=True, queryset=Booth.objects.all(), required=False
     )
-    booth_names = serializers.SerializerMethodField()
+    booth_names    = serializers.SerializerMethodField()
+    panchayat_name = serializers.SerializerMethodField()
+    union_name     = serializers.SerializerMethodField()
 
     def get_user_name(self, obj):
         if obj.name:
@@ -36,6 +38,18 @@ class VolunteerSerializer(serializers.ModelSerializer):
     def get_booth_names(self, obj):
         return list(obj.booths.values_list('name', flat=True))
 
+    def get_panchayat_name(self, obj):
+        try:
+            return obj.booth.panchayat.name or ''
+        except AttributeError:
+            return ''
+
+    def get_union_name(self, obj):
+        try:
+            return obj.booth.panchayat.union.name or ''
+        except AttributeError:
+            return ''
+
     def create(self, validated_data):
         booths = validated_data.pop('booths', [])
         instance = super().create(validated_data)
@@ -54,7 +68,8 @@ class VolunteerSerializer(serializers.ModelSerializer):
         model = Volunteer
         fields = [
             'id', 'user', 'user_name', 'username', 'name', 'voter_id', 'phone',
-            'booth', 'booth_name', 'booths', 'booth_names', 'ward', 'panchayat', 'block',
+            'booth', 'booth_name', 'booths', 'booth_names', 'ward', 'block',
+            'panchayat_name', 'union_name',
             'status', 'volunteer_type', 'role', 'age', 'gender', 'joined_date',
             'source', 'skills', 'vehicle', 'notes', 'phone2',
             'experience_months', 'previous_campaigns',

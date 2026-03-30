@@ -136,7 +136,7 @@ class BoothSimpleSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Booth
-        fields = ['id', 'number', 'name', 'code', 'status']
+        fields = ['id', 'number', 'name', 'code', 'status', 'panchayat']
 
 
 class BoothDetailSerializer(serializers.ModelSerializer):

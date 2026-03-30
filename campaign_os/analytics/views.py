@@ -54,7 +54,9 @@ class AnalyticsViewSet(viewsets.ViewSet):
         """Get booth-wise statistics using actual voter record counts"""
         constituency_id = request.query_params.get('constituency_id')
 
-        booths = Booth.objects.filter(is_active=True).select_related('panchayat')
+        booths = Booth.objects.filter(is_active=True).select_related(
+            'panchayat', 'panchayat__union', 'panchayat__union__block'
+        )
         if constituency_id:
             booths = booths.filter(panchayat__union__block__constituency_id=constituency_id)
 
@@ -68,11 +70,17 @@ class AnalyticsViewSet(viewsets.ViewSet):
         for b in booths:
             total = b.actual_total
             contacted = b.actual_contacted
+            panchayat = b.panchayat
+            union  = panchayat.union  if panchayat else None
+            block  = union.block      if union     else None
             stats.append({
                 'id': b.id,
                 'name': b.name,
                 'number': b.number,
                 'constituency_name': None,
+                'panchayat_name': panchayat.name if panchayat else '',
+                'union_name':     union.name     if union     else '',
+                'block_name':     block.name     if block     else '',
                 'total_voters': total,
                 'voters_contacted': contacted,
                 'coverage_percentage': round(contacted * 100 / total, 1) if total > 0 else 0,

@@ -5,6 +5,7 @@ from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser
+from django.db.models import Q
 from campaign_os.volunteers.models import Volunteer, VolunteerTask, VolunteerAttendance
 from campaign_os.volunteers.serializers import (
     VolunteerSerializer, VolunteerTaskSerializer, VolunteerAttendanceSerializer
@@ -16,11 +17,36 @@ from campaign_os.core.permissions import ScreenPermission
 class VolunteerViewSet(viewsets.ModelViewSet):
     """Volunteer management"""
     screen_slug = 'volunteer'
-    queryset = Volunteer.objects.filter(is_active=True).select_related('user')
+    queryset = Volunteer.objects.filter(is_active=True).select_related(
+        'user', 'booth__panchayat__union__block'
+    )
     serializer_class = VolunteerSerializer
     permission_classes = [permissions.IsAuthenticated, ScreenPermission]
     filterset_fields = ['booth', 'status', 'ward']
-    search_fields = ['name', 'user__username', 'user__first_name', 'user__last_name']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        search = self.request.query_params.get('search', '').strip()
+        if search:
+            q = (
+                Q(name__icontains=search) |
+                Q(phone__icontains=search) |
+                Q(phone2__icontains=search) |
+                Q(voter_id__icontains=search) |
+                Q(role__icontains=search) |
+                Q(block__icontains=search) |
+                Q(skills__icontains=search) |
+                Q(user__first_name__icontains=search) |
+                Q(user__last_name__icontains=search) |
+                Q(user__username__icontains=search) |
+                Q(booth__panchayat__name__icontains=search) |
+                Q(booth__panchayat__union__name__icontains=search) |
+                Q(booth__panchayat__union__block__name__icontains=search)
+            )
+            if search.isdigit():
+                q |= Q(age=int(search))
+            qs = qs.filter(q)
+        return qs
 
     @action(detail=False, methods=['GET'], url_path='names')
     def names(self, request):

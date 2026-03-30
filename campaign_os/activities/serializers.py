@@ -27,7 +27,7 @@ class FieldSurveySerializer(serializers.ModelSerializer):
     class Meta:
         model  = FieldSurvey
         fields = [
-            'id', 'survey_date', 'block', 'village', 'booth_no',
+            'id', 'voter', 'survey_date', 'block', 'village', 'booth_no',
             'voter_name', 'age', 'gender', 'phone', 'address',
             'is_registered', 'aware_of_candidate', 'likely_to_vote',
             'support_level', 'party_preference', 'key_issues', 'remarks',
