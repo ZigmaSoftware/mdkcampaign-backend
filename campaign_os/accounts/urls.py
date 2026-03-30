@@ -6,10 +6,13 @@ from rest_framework.routers import DefaultRouter
 from campaign_os.accounts import views
 
 router = DefaultRouter()
-router.register(r'users', views.UserViewSet, basename='user')
-router.register(r'roles', views.RoleViewSet, basename='role')
-router.register(r'logs', views.UserLogViewSet, basename='userlog')
-router.register(r'permissions', views.PagePermissionViewSet, basename='permission')
+router.register(r'users',              views.UserViewSet,               basename='user')
+router.register(r'roles',              views.RoleViewSet,               basename='role')
+router.register(r'logs',               views.UserLogViewSet,            basename='userlog')
+router.register(r'permissions',        views.PagePermissionViewSet,     basename='permission')
+router.register(r'main-screens',       views.MainScreenViewSet,         basename='main-screen')
+router.register(r'user-screens',       views.UserScreenViewSet,         basename='user-screen')
+router.register(r'screen-permissions', views.UserScreenPermissionViewSet, basename='screen-permission')
 
 urlpatterns = [
     path('', include(router.urls)),

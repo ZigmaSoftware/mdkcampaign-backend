@@ -11,10 +11,11 @@ class User(AbstractUser):
     """
     ROLE_CHOICES = (
         ('admin',            'System Administrator'),
+        ('volunteer',        'Campaign Volunteer'),
+        ('member',           'Campaign Member'),
         ('district_head',    'District Head'),
         ('constituency_mgr', 'Constituency Manager'),
         ('booth_agent',      'Booth Agent'),
-        ('volunteer',        'Campaign Volunteer'),
         ('voter',            'Registered Voter'),
         ('analyst',          'Data Analyst'),
         ('observer',         'Observer'),
@@ -218,6 +219,76 @@ class PagePermission(models.Model):
 
     def __str__(self):
         return f"{self.role} → {self.page_id}: {'✓' if self.can_access else '✗'}"
+
+
+class MainScreen(models.Model):
+    """Top-level navigation screen (e.g. Entry, Masters Config)"""
+    name   = models.CharField(max_length=100)
+    slug   = models.CharField(max_length=50, unique=True)
+    icon   = models.CharField(max_length=100, blank=True)
+    order  = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['order']
+        verbose_name = 'Main Screen'
+        verbose_name_plural = 'Main Screens'
+
+    def __str__(self):
+        return self.name
+
+
+class UserScreen(models.Model):
+    """Sub-screen inside a MainScreen (e.g. Voter Details, District)"""
+    main_screen = models.ForeignKey(MainScreen, on_delete=models.CASCADE, related_name='screens')
+    name        = models.CharField(max_length=100)
+    slug        = models.CharField(max_length=50, unique=True)
+    icon        = models.CharField(max_length=100, blank=True)
+    order       = models.PositiveIntegerField(default=0)
+    is_active   = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['main_screen__order', 'order']
+        verbose_name = 'User Screen'
+        verbose_name_plural = 'User Screens'
+
+    def __str__(self):
+        return f"{self.main_screen.name} > {self.name}"
+
+
+class UserScreenPermission(models.Model):
+    """
+    CRUD-level permission: which actions a role can perform on a UserScreen.
+    Response shape delivered to the frontend:
+        {
+          "main_screen_slug": {
+            "user_screen_slug": ["view", "add", "edit", "delete"]
+          }
+        }
+    """
+    role        = models.CharField(max_length=20, choices=User.ROLE_CHOICES, db_index=True)
+    user_screen = models.ForeignKey(UserScreen, on_delete=models.CASCADE, related_name='permissions')
+    can_view    = models.BooleanField(default=False)
+    can_add     = models.BooleanField(default=False)
+    can_edit    = models.BooleanField(default=False)
+    can_delete  = models.BooleanField(default=False)
+
+    class Meta:
+        unique_together = ['role', 'user_screen']
+        verbose_name = 'User Screen Permission'
+        verbose_name_plural = 'User Screen Permissions'
+
+    def __str__(self):
+        return f"{self.role} → {self.user_screen.slug}"
+
+    @property
+    def allowed_actions(self):
+        actions = []
+        if self.can_view:   actions.append('view')
+        if self.can_add:    actions.append('add')
+        if self.can_edit:   actions.append('edit')
+        if self.can_delete: actions.append('delete')
+        return actions
 
 
 def seed_default_permissions():

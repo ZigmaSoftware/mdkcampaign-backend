@@ -9,12 +9,14 @@ from rest_framework.parsers import MultiPartParser
 from campaign_os.campaigns.models import CampaignEvent, EventAttendee, Task
 from campaign_os.campaigns.serializers import CampaignEventSerializer, EventAttendeeSerializer, TaskSerializer
 from campaign_os.core.utils.bulk_upload import parse_upload, BulkResult, resolve_by_code, to_str, to_int
+from campaign_os.core.permissions import ScreenPermission
 
 
 class CampaignEventViewSet(viewsets.ModelViewSet):
+    screen_slug = 'campaign'
     queryset = CampaignEvent.objects.filter(is_active=True)
     serializer_class = CampaignEventSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, ScreenPermission]
     filterset_fields = ['constituency', 'event_type', 'status', 'scheduled_date']
     search_fields = ['title', 'location']
     ordering_fields = ['scheduled_date', 'created_at']
@@ -82,11 +84,12 @@ class CampaignEventViewSet(viewsets.ModelViewSet):
 
 
 class TaskViewSet(viewsets.ModelViewSet):
+    screen_slug = 'event'
     queryset = Task.objects.filter(is_active=True).select_related(
         'delivery_incharge', 'coordinator', 'task_category'
     )
     serializer_class = TaskSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, ScreenPermission]
     filterset_fields = ['status', 'category', 'task_category']
     search_fields = ['title', 'venue']
     ordering_fields = ['expected_datetime', 'created_at']
@@ -197,9 +200,10 @@ class TaskViewSet(viewsets.ModelViewSet):
 
 
 class EventAttendeeViewSet(viewsets.ModelViewSet):
+    screen_slug = 'campaign'
     queryset = EventAttendee.objects.filter(is_active=True)
     serializer_class = EventAttendeeSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, ScreenPermission]
     filterset_fields = ['event', 'attendee_type', 'sentiment']
 
     def perform_create(self, serializer):

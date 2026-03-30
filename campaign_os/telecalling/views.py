@@ -1,12 +1,14 @@
 from rest_framework import viewsets, permissions
 from .models import TelecallingAssignment, TelecallingFeedback
 from .serializers import TelecallingAssignmentSerializer, TelecallingFeedbackSerializer
+from campaign_os.core.permissions import ScreenPermission
 
 
 class TelecallingAssignmentViewSet(viewsets.ModelViewSet):
+    screen_slug = 'assign-telecalling'
     queryset = TelecallingAssignment.objects.filter(is_active=True).prefetch_related('voters')
     serializer_class = TelecallingAssignmentSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, ScreenPermission]
     filterset_fields = ['assigned_date', 'telecaller_id']
 
     def perform_create(self, serializer):
@@ -21,9 +23,10 @@ class TelecallingAssignmentViewSet(viewsets.ModelViewSet):
 
 
 class TelecallingFeedbackViewSet(viewsets.ModelViewSet):
+    screen_slug = 'feedback-review'
     queryset = TelecallingFeedback.objects.filter(is_active=True)
     serializer_class = TelecallingFeedbackSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, ScreenPermission]
     filterset_fields = ['action', 'survey']
 
     def perform_create(self, serializer):

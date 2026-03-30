@@ -10,7 +10,7 @@ class VolunteerSerializer(serializers.ModelSerializer):
     user_name   = serializers.SerializerMethodField()
     booth_name  = serializers.CharField(source='booth.name', read_only=True)
     username    = serializers.SerializerMethodField()
-    phone       = serializers.SerializerMethodField()
+    phone       = serializers.CharField(max_length=20, required=False, allow_blank=True, allow_null=True)
     booths      = serializers.PrimaryKeyRelatedField(
         many=True, queryset=Booth.objects.all(), required=False
     )
@@ -26,8 +26,12 @@ class VolunteerSerializer(serializers.ModelSerializer):
     def get_username(self, obj):
         return obj.user.username if obj.user_id else ''
 
-    def get_phone(self, obj):
-        return obj.phone or (getattr(obj.user, 'phone', '') if obj.user_id else '')
+    def to_representation(self, obj):
+        data = super().to_representation(obj)
+        # Fall back to linked user's phone when the volunteer's own phone is blank
+        if not data.get('phone') and obj.user_id:
+            data['phone'] = getattr(obj.user, 'phone', '') or ''
+        return data
 
     def get_booth_names(self, obj):
         return list(obj.booths.values_list('name', flat=True))
@@ -49,8 +53,8 @@ class VolunteerSerializer(serializers.ModelSerializer):
     class Meta:
         model = Volunteer
         fields = [
-            'id', 'user', 'user_name', 'username', 'name', 'phone',
-            'booth', 'booth_name', 'booths', 'booth_names', 'ward', 'block',
+            'id', 'user', 'user_name', 'username', 'name', 'voter_id', 'phone',
+            'booth', 'booth_name', 'booths', 'booth_names', 'ward', 'panchayat', 'block',
             'status', 'volunteer_type', 'role', 'age', 'gender', 'joined_date',
             'source', 'skills', 'vehicle', 'notes', 'phone2',
             'experience_months', 'previous_campaigns',

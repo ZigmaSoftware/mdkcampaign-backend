@@ -4,7 +4,7 @@ Serializers for master data
 from rest_framework import serializers
 from campaign_os.masters.models import (
     Country, State, District, Constituency, Ward, Booth, PollingArea,
-    Candidate, Party, Scheme, Issue, Achievement, TaskCategory, CampaignActivityType
+    Candidate, Party, Scheme, Issue, Achievement, TaskCategory, CampaignActivityType, VolunteerRole, VolunteerType, Panchayat
 )
 from django.contrib.auth import get_user_model
 
@@ -145,7 +145,8 @@ class BoothSimpleSerializer(serializers.ModelSerializer):
 
 class BoothDetailSerializer(serializers.ModelSerializer):
     """Full booth details with coverage stats"""
-    ward_name = serializers.CharField(source='ward.name', read_only=True, default='')
+    ward_name      = serializers.CharField(source='ward.name',      read_only=True, default='')
+    panchayat_name = serializers.CharField(source='panchayat.name', read_only=True, default='')
     ward = serializers.PrimaryKeyRelatedField(
         queryset=Ward.objects.all(), required=False, allow_null=True
     )
@@ -165,7 +166,7 @@ class BoothDetailSerializer(serializers.ModelSerializer):
         # which incorrectly marks ward as required. DB still enforces uniqueness.
         validators = []
         fields = [
-            'id', 'ward', 'ward_name', 'constituency_name', 'number', 'name', 'code',
+            'id', 'ward', 'ward_name', 'panchayat', 'panchayat_name', 'constituency_name', 'number', 'name', 'code',
             'address', 'village', 'latitude', 'longitude',
             'total_voters', 'male_voters', 'female_voters', 'third_gender_voters',
             'total_voters_calculated', 'primary_agent', 'agent_name',
@@ -303,3 +304,23 @@ class CampaignActivityTypeSerializer(serializers.ModelSerializer):
     class Meta:
         model = CampaignActivityType
         fields = ['id', 'name', 'event_type', 'description', 'order', 'is_active', 'created_at', 'updated_at']
+
+
+class VolunteerRoleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = VolunteerRole
+        fields = ['id', 'name', 'description', 'order', 'created_at', 'updated_at']
+
+
+class VolunteerTypeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = VolunteerType
+        fields = ['id', 'name', 'description', 'order', 'created_at', 'updated_at']
+
+
+class PanchayatSerializer(serializers.ModelSerializer):
+    ward_name = serializers.CharField(source='ward.name', read_only=True)
+
+    class Meta:
+        model = Panchayat
+        fields = ['id', 'ward', 'ward_name', 'name', 'code', 'category', 'description', 'created_at', 'updated_at']

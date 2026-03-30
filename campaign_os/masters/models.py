@@ -147,6 +147,10 @@ class Booth(BaseModel):
         Ward, on_delete=models.SET_NULL, null=True, blank=True,
         related_name='booths', db_constraint=False
     )
+    panchayat = models.ForeignKey(
+        'masters.Panchayat', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='booths', db_constraint=False
+    )
     number = models.CharField(max_length=10, null=True, blank=True)
     name   = models.CharField(max_length=200, null=True, blank=True)
     code   = models.CharField(max_length=5, unique=True)
@@ -390,6 +394,58 @@ class CampaignActivityType(BaseModel):
     class Meta:
         ordering = ['order', 'name']
         verbose_name_plural = 'Campaign Activity Types'
+
+    def __str__(self):
+        return self.name
+
+
+class Panchayat(BaseModel):
+    """Panchayat — local government unit within a Ward/Constituency"""
+    ward = models.ForeignKey(
+        'masters.Ward', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='panchayats', db_constraint=False
+    )
+    CATEGORY_CHOICES = [
+        ('village_panchayat', 'Village Panchayat'),
+        ('town_panchayat',    'Town Panchayat'),
+    ]
+    name        = models.CharField(max_length=200)
+    code        = models.CharField(max_length=20, blank=True, null=True)
+    category    = models.CharField(max_length=30, choices=CATEGORY_CHOICES, blank=True, null=True)
+    description = models.TextField(blank=True, null=True)
+
+    class Meta:
+        ordering = ['name']
+        verbose_name_plural = 'Panchayats'
+
+    def __str__(self):
+        ward_name = self.ward.name if self.ward_id else '?'
+        return f"{self.name} ({ward_name})"
+
+
+class VolunteerType(BaseModel):
+    """Volunteer Type master — drives the volunteer type dropdown in Volunteer Entry"""
+    name        = models.CharField(max_length=100, unique=True)
+    description = models.TextField(blank=True, null=True)
+    order       = models.IntegerField(default=0)
+
+    class Meta:
+        ordering = ['order', 'name']
+        verbose_name_plural = 'Volunteer Types'
+
+    def __str__(self):
+        return self.name
+
+
+class VolunteerRole(BaseModel):
+    """Volunteer Role master — drives the role dropdown in Volunteer Entry"""
+    name        = models.CharField(max_length=100, unique=True)
+    description = models.TextField(blank=True, null=True)
+    order       = models.IntegerField(default=0)
+
+    class Meta:
+        ordering = ['order', 'name']
+        verbose_name_plural = 'Volunteer Roles'
 
     def __str__(self):
         return self.name

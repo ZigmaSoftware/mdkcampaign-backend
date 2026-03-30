@@ -10,7 +10,7 @@ from django.db.models import Count, Q, IntegerField
 from django.db.models.functions import Cast
 from campaign_os.masters.models import (
     Country, State, District, Constituency, Ward, Booth, PollingArea,
-    Candidate, Party, Scheme, Issue, Achievement, TaskCategory, CampaignActivityType
+    Candidate, Party, Scheme, Issue, Achievement, TaskCategory, CampaignActivityType, VolunteerRole, VolunteerType, Panchayat
 )
 from campaign_os.masters.serializers import (
     CountrySerializer, StateSerializer, DistrictSimpleSerializer, DistrictDetailSerializer,
@@ -19,11 +19,12 @@ from campaign_os.masters.serializers import (
     BoothSimpleSerializer, BoothDetailSerializer, PollingAreaSerializer,
     PartySerializer, CandidateDetailSerializer, CandidateSimpleSerializer,
     SchemeSerializer, IssueSerializer, AchievementSerializer, TaskCategorySerializer,
-    CampaignActivityTypeSerializer
+    CampaignActivityTypeSerializer, VolunteerRoleSerializer, VolunteerTypeSerializer, PanchayatSerializer
 )
 from campaign_os.core.utils.bulk_upload import (
     parse_upload, BulkResult, resolve_by_code, to_int, to_str, to_bool
 )
+from campaign_os.core.permissions import ScreenPermission
 
 
 class CountryViewSet(viewsets.ReadOnlyModelViewSet):
@@ -41,8 +42,9 @@ class StateViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class DistrictViewSet(viewsets.ModelViewSet):
+    screen_slug = "district"
     queryset = District.objects.filter(is_active=True).select_related('state')
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, ScreenPermission]
     filterset_fields = ['state']
     search_fields = ['name', 'code']
     ordering = ['name']
@@ -67,8 +69,9 @@ class DistrictViewSet(viewsets.ModelViewSet):
 
 
 class ConstituencyViewSet(viewsets.ModelViewSet):
+    screen_slug = "constituency"
     queryset = Constituency.objects.filter(is_active=True).select_related('district')
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, ScreenPermission]
     filterset_fields = ['district', 'election_type']
     search_fields = ['name', 'code']
     ordering = ['name']
@@ -118,8 +121,9 @@ class ConstituencyViewSet(viewsets.ModelViewSet):
 
 
 class WardViewSet(viewsets.ModelViewSet):
+    screen_slug = "ward"
     queryset = Ward.objects.filter(is_active=True).select_related('constituency')
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, ScreenPermission]
     filterset_fields = ['constituency']
     search_fields = ['name', 'code']
 
@@ -161,6 +165,7 @@ class WardViewSet(viewsets.ModelViewSet):
 
 
 class BoothViewSet(viewsets.ModelViewSet):
+    screen_slug = "booth-master"
     queryset = (
         Booth.objects.filter(is_active=True)
              .select_related('ward', 'ward__constituency', 'primary_agent')
@@ -168,7 +173,7 @@ class BoothViewSet(viewsets.ModelViewSet):
              .annotate(number_int=Cast('number', output_field=IntegerField()))
              .order_by('number_int')
     )
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, ScreenPermission]
     filterset_fields = ['ward', 'status', 'sentiment']
     search_fields = ['name', 'number', 'code', 'address']
     ordering = ['number_int']
@@ -263,17 +268,19 @@ class BoothViewSet(viewsets.ModelViewSet):
 
 
 class PollingAreaViewSet(viewsets.ModelViewSet):
+    screen_slug = "area"
     queryset = PollingArea.objects.filter(is_active=True).select_related('constituency')
     serializer_class = PollingAreaSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, ScreenPermission]
     filterset_fields = ['constituency']
     search_fields = ['name', 'code']
 
 
 class PartyViewSet(viewsets.ModelViewSet):
+    screen_slug = "party"
     queryset = Party.objects.filter(is_active=True)
     serializer_class = PartySerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, ScreenPermission]
     search_fields = ['name', 'code', 'abbreviation']
     ordering = ['name']
 
@@ -319,8 +326,9 @@ class PartyViewSet(viewsets.ModelViewSet):
 
 
 class CandidateViewSet(viewsets.ModelViewSet):
+    screen_slug = "candidate"
     queryset = Candidate.objects.filter(is_active=True).select_related('party', 'constituency')
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, ScreenPermission]
     filterset_fields = ['party', 'constituency', 'is_incumbent']
     search_fields = ['name', 'father_name']
     ordering = ['name']
@@ -366,9 +374,10 @@ class CandidateViewSet(viewsets.ModelViewSet):
 
 
 class SchemeViewSet(viewsets.ModelViewSet):
+    screen_slug = "scheme"
     queryset = Scheme.objects.filter(is_active=True).select_related('constituency')
     serializer_class = SchemeSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, ScreenPermission]
     filterset_fields = ['scheme_type', 'constituency']
     search_fields = ['name', 'description']
     ordering = ['-created_at']
@@ -409,9 +418,10 @@ class SchemeViewSet(viewsets.ModelViewSet):
 
 
 class AchievementViewSet(viewsets.ModelViewSet):
+    screen_slug = "achievement"
     queryset = Achievement.objects.filter(is_active=True).select_related('ward', 'booth')
     serializer_class = AchievementSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, ScreenPermission]
     filterset_fields = ['ward', 'booth']
     search_fields = ['name', 'description']
     ordering = ['-created_at']
@@ -419,9 +429,10 @@ class AchievementViewSet(viewsets.ModelViewSet):
 
 
 class TaskCategoryViewSet(viewsets.ModelViewSet):
+    screen_slug = "task-category"
     queryset = TaskCategory.objects.filter(is_active=True)
     serializer_class = TaskCategorySerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, ScreenPermission]
     search_fields = ['name']
     ordering = ['priority', 'name']
 
@@ -437,10 +448,53 @@ class TaskCategoryViewSet(viewsets.ModelViewSet):
 
 
 class CampaignActivityTypeViewSet(viewsets.ModelViewSet):
+    screen_slug = 'campaign-activity'
     """Campaign Activity Type master — drives the activity dropdown in Campaign Entry"""
     queryset = CampaignActivityType.objects.all().order_by('order', 'name')
     serializer_class = CampaignActivityTypeSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, ScreenPermission]
     filter_backends = [filters.SearchFilter, DjangoFilterBackend]
     search_fields = ['name']
     filterset_fields = ['event_type', 'is_active']
+
+
+class VolunteerTypeViewSet(viewsets.ModelViewSet):
+    screen_slug = 'volunteer-type'
+    """Volunteer Type master — drives the volunteer type dropdown in Volunteer Entry"""
+    queryset = VolunteerType.objects.filter(is_active=True).order_by('order', 'name')
+    serializer_class = VolunteerTypeSerializer
+    permission_classes = [permissions.IsAuthenticated, ScreenPermission]
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['name']
+
+    def perform_destroy(self, instance):
+        instance.is_active = False
+        instance.save()
+
+
+class VolunteerRoleViewSet(viewsets.ModelViewSet):
+    screen_slug = 'volunteer-role'
+    """Volunteer Role master — drives the role dropdown in Volunteer Entry"""
+    queryset = VolunteerRole.objects.filter(is_active=True).order_by('order', 'name')
+    serializer_class = VolunteerRoleSerializer
+    permission_classes = [permissions.IsAuthenticated, ScreenPermission]
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['name']
+
+    def perform_destroy(self, instance):
+        instance.is_active = False
+        instance.save()
+
+
+class PanchayatViewSet(viewsets.ModelViewSet):
+    screen_slug = 'panchayat'
+    queryset = Panchayat.objects.filter(is_active=True).select_related('ward').order_by('name')
+    serializer_class = PanchayatSerializer
+    permission_classes = [permissions.IsAuthenticated, ScreenPermission]
+    filter_backends = [filters.SearchFilter, DjangoFilterBackend]
+    search_fields = ['name', 'code']
+    filterset_fields = ['ward']
+
+    def perform_destroy(self, instance):
+        instance.is_active = False
+        instance.save()

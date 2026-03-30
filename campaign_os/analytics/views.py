@@ -61,6 +61,7 @@ class AnalyticsViewSet(viewsets.ViewSet):
         booths = booths.annotate(
             actual_total=Count('voters', filter=Q(voters__is_active=True), distinct=True),
             actual_contacted=Count('voters', filter=Q(voters__is_active=True, voters__is_contacted=True), distinct=True),
+            vol_count=Count('volunteers', filter=Q(volunteers__is_active=True), distinct=True),
         ).order_by('number')
 
         stats = []
@@ -76,8 +77,31 @@ class AnalyticsViewSet(viewsets.ViewSet):
                 'total_voters': total,
                 'voters_contacted': contacted,
                 'coverage_percentage': round(contacted * 100 / total, 1) if total > 0 else 0,
+                'volunteer_count': b.vol_count,
             })
         return Response(stats)
+
+    @action(detail=False, methods=['GET'])
+    def booth_volunteers(self, request, booth_id=None):
+        """Return volunteers assigned to a booth, grouped by role."""
+        volunteers = Volunteer.objects.filter(
+            is_active=True
+        ).filter(
+            Q(booth_id=booth_id) | Q(booths__id=booth_id)
+        ).distinct().values('id', 'name', 'phone', 'phone2', 'skills', 'role', 'status')
+        return Response(list(volunteers))
+
+    @action(detail=False, methods=['GET'])
+    def booth_voters_list(self, request, booth_id=None):
+        """Return voters for a specific booth with basic details."""
+        voters = Voter.objects.filter(
+            is_active=True, booth_id=booth_id
+        ).order_by('village__name', 'name').values(
+            'id', 'voter_id', 'name', 'age', 'gender',
+            'sentiment', 'is_contacted', 'phone',
+            ward_name=F('village__name'),
+        )
+        return Response(list(voters))
     
     @action(detail=False, methods=['GET'])
     def constituency_stats(self, request):
@@ -145,42 +169,105 @@ class AnalyticsViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=['GET'])
     def ward_statistics(self, request):
-        """Get ward-wise voter statistics"""
+        """Get ward-wise voter statistics — uses bulk SQL aggregations to avoid N+1."""
         from campaign_os.masters.models import Ward
+        from collections import defaultdict
+
         constituency_id = request.query_params.get('constituency_id')
 
-        wards = Ward.objects.filter(is_active=True)
-        if constituency_id:
-            wards = wards.filter(constituency_id=constituency_id)
+        # Fast pre-check: find ward IDs that actually have voters via either path.
+        # If none exist yet (data not linked), return empty immediately.
+        direct_ward_ids = set(
+            Voter.objects.filter(is_active=True, village__isnull=False)
+            .values_list('village_id', flat=True).distinct()
+        )
+        booth_ward_ids = set(
+            Voter.objects.filter(is_active=True, booth__ward__isnull=False)
+            .values_list('booth__ward_id', flat=True).distinct()
+        )
+        relevant_ward_ids = direct_ward_ids | booth_ward_ids
+        if not relevant_ward_ids:
+            return Response([])
 
+        # Fetch only wards that have data, with SQL-level annotations
+        ward_qs = Ward.objects.filter(is_active=True, id__in=relevant_ward_ids)
+        if constituency_id:
+            ward_qs = ward_qs.filter(constituency_id=constituency_id)
+
+        ward_qs = ward_qs.select_related('constituency').annotate(
+            direct_voters=Count('voters', filter=Q(voters__is_active=True), distinct=True),
+            direct_contacted=Count('voters', filter=Q(voters__is_active=True, voters__is_contacted=True), distinct=True),
+            vol_count=Count('volunteers', filter=Q(volunteers__is_active=True), distinct=True),
+            active_booth_count=Count('booths', filter=Q(booths__is_active=True), distinct=True),
+        )
+        ward_map = {w.id: w for w in ward_qs}
+        if not ward_map:
+            return Response([])
+
+        active_ids = set(ward_map.keys())
+
+        # Bulk: booth-based voter counts grouped by ward (single query)
+        booth_voters_by_ward: dict = defaultdict(lambda: {'total': 0, 'contacted': 0})
+        for row in (
+            Voter.objects.filter(is_active=True, booth__ward_id__in=active_ids)
+            .values('booth__ward_id')
+            .annotate(
+                total=Count('id', distinct=True),
+                contacted=Count('id', filter=Q(is_contacted=True), distinct=True),
+            )
+        ):
+            wid = row['booth__ward_id']
+            booth_voters_by_ward[wid]['total'] = row['total']
+            booth_voters_by_ward[wid]['contacted'] = row['contacted']
+
+        # Bulk: sentiment — direct voters
+        sentiment_by_ward: dict = defaultdict(lambda: defaultdict(int))
+        for row in (
+            Voter.objects.filter(is_active=True, village_id__in=active_ids)
+            .values('village_id', 'sentiment')
+            .annotate(cnt=Count('id'))
+        ):
+            sentiment_by_ward[row['village_id']][row['sentiment'] or ''] += row['cnt']
+        # Bulk: sentiment — booth-based voters
+        for row in (
+            Voter.objects.filter(is_active=True, booth__ward_id__in=active_ids)
+            .values('booth__ward_id', 'sentiment')
+            .annotate(cnt=Count('id'))
+        ):
+            sentiment_by_ward[row['booth__ward_id']][row['sentiment'] or ''] += row['cnt']
+
+        # Build result in Python
         result = []
-        for ward in wards:
-            # Count voters via EITHER the direct village FK OR via the booth's ward FK
-            voters = Voter.objects.filter(
-                is_active=True
-            ).filter(
-                Q(village=ward) | Q(booth__ward=ward)
-            ).distinct()
-            total = voters.count()
-            contacted = voters.filter(is_contacted=True).count()
-            sentiment = dict(voters.values('sentiment').annotate(cnt=Count('id')).values_list('sentiment', 'cnt'))
-            caste_dist = dict(voters.values('caste').annotate(cnt=Count('id')).values_list('caste', 'cnt'))
-            # Count distinct booths from both the ward FK and from the voters' booths
-            ward_booth_ids = set(ward.booths.filter(is_active=True).values_list('id', flat=True))
-            voter_booth_ids = set(voters.values_list('booth', flat=True).distinct())
-            all_booth_ids = ward_booth_ids | voter_booth_ids
+        for wid, w in ward_map.items():
+            direct_v = w.direct_voters
+            direct_c = w.direct_contacted
+            booth_v  = booth_voters_by_ward[wid]['total']
+            booth_c  = booth_voters_by_ward[wid]['contacted']
+            total     = max(direct_v, booth_v)
+            contacted = max(direct_c, booth_c)
             result.append({
-                'id': ward.id,
-                'name': ward.name,
-                'constituency_name': ward.constituency.name if ward.constituency_id else '',
+                'id': wid,
+                'name': w.name,
+                'constituency_name': w.constituency.name if w.constituency_id else '',
                 'total_voters': total,
                 'voters_contacted': contacted,
                 'coverage_pct': round(contacted * 100 / total, 1) if total > 0 else 0,
-                'sentiment': sentiment,
-                'caste_dist': caste_dist,
-                'booth_count': len(all_booth_ids),
+                'sentiment': dict(sentiment_by_ward[wid]),
+                'caste_dist': {},
+                'booth_count': w.active_booth_count,
+                'volunteer_count': w.vol_count,
             })
+
+        result.sort(key=lambda x: x['name'])
         return Response(result)
+
+    @action(detail=False, methods=['GET'])
+    def ward_volunteers(self, request, ward_id=None):
+        """Return volunteers assigned to a ward, grouped by role."""
+        volunteers = Volunteer.objects.filter(
+            is_active=True, ward_id=ward_id
+        ).values('id', 'name', 'phone', 'phone2', 'skills', 'role', 'status')
+        return Response(list(volunteers))
 
     @action(detail=False, methods=['POST'])
     def fix_links(self, request):

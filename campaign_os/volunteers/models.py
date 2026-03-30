@@ -12,8 +12,9 @@ class Volunteer(BaseModel):
         null=True, blank=True,
         related_name='volunteer_profile', db_constraint=False
     )
-    name  = models.CharField(max_length=150, blank=True, null=True)
-    phone = models.CharField(max_length=20, blank=True, null=True)
+    name     = models.CharField(max_length=150, blank=True, null=True)
+    voter_id = models.CharField(max_length=20, blank=True, null=True, db_index=True)
+    phone    = models.CharField(max_length=20, blank=True, null=True)
 
     # Assignment
     booth = models.ForeignKey(
@@ -27,6 +28,10 @@ class Volunteer(BaseModel):
     )
     ward = models.ForeignKey(
         'masters.Ward', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='volunteers', db_constraint=False
+    )
+    panchayat = models.ForeignKey(
+        'masters.Panchayat', on_delete=models.SET_NULL, null=True, blank=True,
         related_name='volunteers', db_constraint=False
     )
 

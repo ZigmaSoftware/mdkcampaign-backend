@@ -5,14 +5,19 @@ from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from campaign_os.core.permissions import ScreenPermission
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
-from campaign_os.accounts.models import User, Role, UserLog, PagePermission
+from campaign_os.accounts.models import (
+    User, Role, UserLog, PagePermission,
+    MainScreen, UserScreen, UserScreenPermission,
+)
 from campaign_os.accounts.serializers import (
     UserDetailSerializer, UserCreateUpdateSerializer, UserSimpleSerializer,
     CustomTokenObtainPairSerializer, ChangePasswordSerializer,
-    RoleSerializer, UserLogSerializer, PagePermissionSerializer
+    RoleSerializer, UserLogSerializer, PagePermissionSerializer,
+    MainScreenSerializer, UserScreenSerializer, UserScreenPermissionSerializer,
 )
 
 
@@ -33,6 +38,7 @@ class TokenRefreshView(TokenRefreshView):
 class UserViewSet(viewsets.ModelViewSet):
     """
     User management viewset
+    screen_slug = 'user'
     Endpoints:
         GET /api/v1/auth/users/ - List all users
         POST /api/v1/auth/users/ - Create new user
@@ -42,8 +48,9 @@ class UserViewSet(viewsets.ModelViewSet):
         GET /api/v1/auth/users/me/ - Current user info
         POST /api/v1/auth/users/change-password/ - Change password
     """
+    screen_slug = 'user'
     queryset = User.objects.filter(is_active=True)
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, ScreenPermission]
     
     def get_serializer_class(self):
         if self.action in ['create', 'update', 'partial_update']:
@@ -192,9 +199,164 @@ class PagePermissionViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['GET'], url_path='my_access')
     def my_access(self, request):
-        """Return list of page_ids the current user can access"""
+        """
+        Return the current user's page access list AND screen-level CRUD permissions.
+
+        Response shape:
+        {
+          "role": "admin",
+          "allowed_pages": ["dashboard", "entry", ...],
+          "screen_permissions": {
+            "entry": {
+              "voter": ["view", "add", "edit", "delete"],
+              "booth":  ["view"]
+            },
+            "masters-config": { ... }
+          }
+        }
+        """
         role = request.user.role
-        allowed = list(
-            PagePermission.objects.filter(role=role, can_access=True).values_list('page_id', flat=True)
+
+        # Build screen_permissions and derive allowed_pages from UserScreenPermission
+        perms = (
+            UserScreenPermission.objects
+            .filter(role=role)
+            .select_related('user_screen__main_screen')
         )
-        return Response({'role': role, 'allowed_pages': allowed})
+        screen_permissions = {}
+        allowed_main_screens = set()
+
+        for p in perms:
+            actions = p.allowed_actions
+            if actions:
+                ms_slug = p.user_screen.main_screen.slug
+                us_slug = p.user_screen.slug
+                screen_permissions.setdefault(ms_slug, {})[us_slug] = actions
+                allowed_main_screens.add(ms_slug)
+
+        # Dashboard is always accessible (it has no UserScreen sub-entries)
+        allowed_main_screens.add('dashboard')
+
+        return Response({
+            'role': role,
+            'allowed_pages': list(allowed_main_screens),
+            'screen_permissions': screen_permissions,
+        })
+
+
+class MainScreenViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    List all main screens with their child user screens.
+    GET /api/v1/auth/main-screens/
+    """
+    queryset = MainScreen.objects.filter(is_active=True).prefetch_related('screens')
+    serializer_class = MainScreenSerializer
+    permission_classes = [IsAuthenticated]
+
+
+class UserScreenViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    List all user (sub) screens, optionally filtered by main_screen slug.
+    GET /api/v1/auth/user-screens/?main_screen=entry
+    """
+    queryset = UserScreen.objects.filter(is_active=True).select_related('main_screen')
+    serializer_class = UserScreenSerializer
+    permission_classes = [IsAuthenticated]
+    filterset_fields = ['main_screen', 'is_active']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        ms_slug = self.request.query_params.get('main_screen')
+        if ms_slug:
+            qs = qs.filter(main_screen__slug=ms_slug)
+        return qs
+
+
+class UserScreenPermissionViewSet(viewsets.ModelViewSet):
+    """
+    Manage CRUD-level permissions per role per user screen.
+
+    GET  /api/v1/auth/screen-permissions/             – list (filter by ?role=admin)
+    PUT  /api/v1/auth/screen-permissions/{id}/        – update (admin only)
+    POST /api/v1/auth/screen-permissions/seed/        – seed defaults (admin only)
+    GET  /api/v1/auth/screen-permissions/by_role/     – grouped by main_screen for a role (?role=volunteer)
+    """
+    queryset = UserScreenPermission.objects.all().select_related('user_screen__main_screen')
+    serializer_class = UserScreenPermissionSerializer
+    permission_classes = [IsAuthenticated]
+    filterset_fields = ['role', 'user_screen']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        role = self.request.query_params.get('role')
+        ms_slug = self.request.query_params.get('main_screen')
+        if role:
+            qs = qs.filter(role=role)
+        if ms_slug:
+            qs = qs.filter(user_screen__main_screen__slug=ms_slug)
+        return qs
+
+    def _admin_only(self, request):
+        if request.user.role != 'admin':
+            from rest_framework.response import Response as R
+            return R({'detail': 'Admin only'}, status=status.HTTP_403_FORBIDDEN)
+
+    def update(self, request, *args, **kwargs):
+        err = self._admin_only(request)
+        if err: return err
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        err = self._admin_only(request)
+        if err: return err
+        return super().partial_update(request, *args, **kwargs)
+
+    @action(detail=False, methods=['POST'], url_path='seed')
+    def seed(self, request):
+        """Seed default screen permissions (admin only)"""
+        if request.user.role != 'admin':
+            return Response({'detail': 'Admin only'}, status=status.HTTP_403_FORBIDDEN)
+        from campaign_os.accounts.management.commands.seed_screens import seed_screen_permissions
+        seed_screen_permissions()
+        return Response({'detail': 'Screen permissions seeded'})
+
+    @action(detail=False, methods=['GET'], url_path='by_role')
+    def by_role(self, request):
+        """
+        Return permissions for a specific role grouped by main screen.
+        ?role=volunteer  (defaults to current user's role)
+        """
+        role = request.query_params.get('role', request.user.role)
+        # Only admin can query other roles
+        if role != request.user.role and request.user.role != 'admin':
+            return Response({'detail': 'Admin only'}, status=status.HTTP_403_FORBIDDEN)
+
+        perms = (
+            UserScreenPermission.objects
+            .filter(role=role)
+            .select_related('user_screen__main_screen')
+        )
+        grouped = {}
+        for p in perms:
+            ms = p.user_screen.main_screen
+            ms_key = ms.slug
+            if ms_key not in grouped:
+                grouped[ms_key] = {
+                    'id': ms.id,
+                    'name': ms.name,
+                    'slug': ms.slug,
+                    'screens': [],
+                }
+            grouped[ms_key]['screens'].append({
+                'id': p.id,
+                'user_screen_id': p.user_screen.id,
+                'slug': p.user_screen.slug,
+                'name': p.user_screen.name,
+                'icon': p.user_screen.icon,
+                'can_view': p.can_view,
+                'can_add': p.can_add,
+                'can_edit': p.can_edit,
+                'can_delete': p.can_delete,
+                'allowed_actions': p.allowed_actions,
+            })
+        return Response({'role': role, 'main_screens': list(grouped.values())})

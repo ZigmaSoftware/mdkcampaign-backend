@@ -9,6 +9,7 @@ from django.db.models import Count, Q, Avg
 from datetime import date, timedelta
 from .models import Attendance
 from .serializers import AttendanceSerializer, AttendanceReportSerializer
+from campaign_os.core.permissions import ScreenPermission
 
 
 class AttendanceViewSet(viewsets.ReadOnlyModelViewSet):
@@ -20,9 +21,10 @@ class AttendanceViewSet(viewsets.ReadOnlyModelViewSet):
     GET  /attendance/report/
     GET  /attendance/my_history/
     """
+    screen_slug = 'attendance'
     queryset = Attendance.objects.all()
     serializer_class = AttendanceSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, ScreenPermission]
     filterset_fields = ['user', 'attendance_date', 'status']
     ordering = ['-attendance_date']
 

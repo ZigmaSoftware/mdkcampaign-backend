@@ -19,6 +19,9 @@ router.register(r'schemes', views.SchemeViewSet, basename='scheme')
 router.register(r'achievements', views.AchievementViewSet, basename='achievement')
 router.register(r'task-categories', views.TaskCategoryViewSet, basename='task_category')
 router.register(r'campaign-activity-types', views.CampaignActivityTypeViewSet, basename='campaign_activity_type')
+router.register(r'volunteer-roles', views.VolunteerRoleViewSet, basename='volunteer_role')
+router.register(r'volunteer-types', views.VolunteerTypeViewSet, basename='volunteer_type')
+router.register(r'panchayats', views.PanchayatViewSet, basename='panchayat')
 
 urlpatterns = [
     path('', include(router.urls)),

@@ -7,6 +7,7 @@ from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser
 from django.db.models import Q, Count
 from campaign_os.voters.models import Voter, VoterContact, VoterSurvey, VoterPreference, VoterFeedback
+from campaign_os.core.permissions import ScreenPermission
 from campaign_os.voters.serializers import (
     VoterSerializer, VoterSimpleSerializer, VoterContactSerializer,
     VoterSurveySerializer, VoterPreferenceSerializer, VoterFeedbackSerializer
@@ -16,9 +17,10 @@ from campaign_os.core.utils.bulk_upload import parse_upload, BulkResult, resolve
 
 class VoterViewSet(viewsets.ModelViewSet):
     """Voter management"""
+    screen_slug = 'voter'
     queryset = Voter.objects.filter(is_active=True).prefetch_related('booth', 'village', 'preferred_party')
-    permission_classes = [permissions.IsAuthenticated]
-    filterset_fields = ['village', 'sentiment', 'is_contacted', 'gender']
+    permission_classes = [permissions.IsAuthenticated, ScreenPermission]
+    filterset_fields = ['village', 'sentiment', 'is_contacted', 'gender', 'pincode']
     search_fields = ['name', 'voter_id', 'phone']
     serializer_class = VoterSerializer
 
@@ -31,6 +33,11 @@ class VoterViewSet(viewsets.ModelViewSet):
             booth_ids = [b.strip() for b in booth_param.split(',') if b.strip().isdigit()]
             if booth_ids:
                 qs = qs.filter(booth_id__in=booth_ids)
+
+        # Support ward filter: ?ward=5 (filters via booth__ward)
+        ward_param = self.request.query_params.get('ward', '')
+        if ward_param and ward_param.isdigit():
+            qs = qs.filter(booth__ward_id=ward_param)
 
         # Support date filter on created_at: ?created_date=2026-03-28
         created_date = self.request.query_params.get('created_date', '')
@@ -97,7 +104,7 @@ class VoterViewSet(viewsets.ModelViewSet):
           religion, caste, sub_caste, sentiment, education_level, occupation,
           scheme_name, issue_name, notes
         """
-        from campaign_os.masters.models import Booth, Ward
+        from campaign_os.masters.models import Booth, Ward, Panchayat
 
         rows, err = parse_upload(request)
         if err:
@@ -108,7 +115,8 @@ class VoterViewSet(viewsets.ModelViewSet):
         booths = list(Booth.objects.only('id', 'code', 'number'))
         booth_map = {b.code: b.id for b in booths}
         booth_num_map = {b.number: b.id for b in booths if b.number}
-        ward_map  = {w.code: w.id for w in Ward.objects.only('id', 'code')}
+        ward_map      = {w.code: w.id for w in Ward.objects.only('id', 'code')}
+        panchayat_map = {p.code: p.id for p in Panchayat.objects.only('id', 'code') if p.code}
 
         # Find existing voter_ids to skip duplicates
         all_ids = []
@@ -139,6 +147,7 @@ class VoterViewSet(viewsets.ModelViewSet):
                 if bc and not booth_id:
                     result.fail(i, f'booth_code "{bc}" not found in master — import the booth first')
                     continue
+                pc = to_str(row.get('panchayat_code', ''))
                 batch.append(Voter(
                     voter_id       = voter_id,
                     name           = to_str(row.get('name')),
@@ -154,6 +163,7 @@ class VoterViewSet(viewsets.ModelViewSet):
                     address        = to_str(row.get('address')) or None,
                     booth_id       = booth_id,
                     village_id     = ward_map.get(wc),
+                    panchayat_id   = panchayat_map.get(pc) if pc else None,
                     religion       = to_str(row.get('religion')) or None,
                     caste          = to_str(row.get('caste')) or None,
                     sub_caste      = to_str(row.get('sub_caste')) or None,
@@ -193,9 +203,10 @@ class VoterViewSet(viewsets.ModelViewSet):
 
 class VoterContactViewSet(viewsets.ModelViewSet):
     """Voter contact history tracking"""
+    screen_slug = 'voter'
     queryset = VoterContact.objects.filter(is_active=True)
     serializer_class = VoterContactSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, ScreenPermission]
     filterset_fields = ['voter', 'method']
     ordering = ['-created_at']
 
@@ -214,22 +225,25 @@ class VoterContactViewSet(viewsets.ModelViewSet):
 
 
 class VoterSurveyViewSet(viewsets.ModelViewSet):
+    screen_slug = 'voter-survey'
     queryset = VoterSurvey.objects.filter(is_active=True)
     serializer_class = VoterSurveySerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, ScreenPermission]
     filterset_fields = ['voter', 'survey_type']
 
 
 class VoterPreferenceViewSet(viewsets.ModelViewSet):
+    screen_slug = 'voter'
     queryset = VoterPreference.objects.filter(is_active=True)
     serializer_class = VoterPreferenceSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, ScreenPermission]
 
 
 class VoterFeedbackViewSet(viewsets.ModelViewSet):
+    screen_slug = 'feedback'
     queryset = VoterFeedback.objects.filter(is_active=True)
     serializer_class = VoterFeedbackSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, ScreenPermission]
     filterset_fields = ['voter', 'feedback_type', 'status', 'issue']
     search_fields = ['subject', 'description']
     ordering = ['-created_at']

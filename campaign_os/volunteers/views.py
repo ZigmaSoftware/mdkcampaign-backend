@@ -10,13 +10,15 @@ from campaign_os.volunteers.serializers import (
     VolunteerSerializer, VolunteerTaskSerializer, VolunteerAttendanceSerializer
 )
 from campaign_os.core.utils.bulk_upload import parse_upload, BulkResult, resolve_by_code, to_int, to_str
+from campaign_os.core.permissions import ScreenPermission
 
 
 class VolunteerViewSet(viewsets.ModelViewSet):
     """Volunteer management"""
+    screen_slug = 'volunteer'
     queryset = Volunteer.objects.filter(is_active=True).select_related('user')
     serializer_class = VolunteerSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, ScreenPermission]
     filterset_fields = ['booth', 'status', 'ward']
     search_fields = ['name', 'user__username', 'user__first_name', 'user__last_name']
 
@@ -84,6 +86,7 @@ class VolunteerViewSet(viewsets.ModelViewSet):
                 vol, created = Volunteer.objects.get_or_create(
                     name=name,
                     defaults={
+                        'voter_id':       to_str(row.get('voter_id'))        or None,
                         'phone':          to_str(row.get('phone'))           or None,
                         'phone2':         to_str(row.get('alt_phone'))       or None,
                         'booth_id':       primary_booth_id,
@@ -108,9 +111,10 @@ class VolunteerViewSet(viewsets.ModelViewSet):
 
 
 class VolunteerTaskViewSet(viewsets.ModelViewSet):
+    screen_slug = 'event'
     queryset = VolunteerTask.objects.filter(is_active=True)
     serializer_class = VolunteerTaskSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, ScreenPermission]
     filterset_fields = ['volunteer', 'status', 'assignment_type']
     search_fields = ['title']
     ordering = ['-due_date']
@@ -127,9 +131,10 @@ class VolunteerTaskViewSet(viewsets.ModelViewSet):
 
 
 class VolunteerAttendanceViewSet(viewsets.ModelViewSet):
+    screen_slug = 'attendance'
     queryset = VolunteerAttendance.objects.all()
     serializer_class = VolunteerAttendanceSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, ScreenPermission]
     filterset_fields = ['volunteer', 'date']
     ordering = ['-date']
 

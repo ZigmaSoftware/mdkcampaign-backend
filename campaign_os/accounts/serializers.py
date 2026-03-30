@@ -4,7 +4,10 @@ Serializers for authentication and user management
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.contrib.auth import authenticate
-from campaign_os.accounts.models import User, Role, UserLog, PagePermission
+from campaign_os.accounts.models import (
+    User, Role, UserLog, PagePermission,
+    MainScreen, UserScreen, UserScreenPermission,
+)
 
 
 class UserSimpleSerializer(serializers.ModelSerializer):
@@ -146,3 +149,33 @@ class PagePermissionSerializer(serializers.ModelSerializer):
     class Meta:
         model = PagePermission
         fields = ['id', 'role', 'page_id', 'can_access']
+
+
+class UserScreenSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserScreen
+        fields = ['id', 'main_screen', 'name', 'slug', 'icon', 'order', 'is_active']
+
+
+class MainScreenSerializer(serializers.ModelSerializer):
+    screens = UserScreenSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = MainScreen
+        fields = ['id', 'name', 'slug', 'icon', 'order', 'is_active', 'screens']
+
+
+class UserScreenPermissionSerializer(serializers.ModelSerializer):
+    user_screen_slug     = serializers.CharField(source='user_screen.slug', read_only=True)
+    main_screen_slug     = serializers.CharField(source='user_screen.main_screen.slug', read_only=True)
+    user_screen_name     = serializers.CharField(source='user_screen.name', read_only=True)
+    main_screen_name     = serializers.CharField(source='user_screen.main_screen.name', read_only=True)
+    allowed_actions      = serializers.ListField(read_only=True)
+
+    class Meta:
+        model = UserScreenPermission
+        fields = [
+            'id', 'role', 'user_screen', 'user_screen_slug', 'user_screen_name',
+            'main_screen_slug', 'main_screen_name',
+            'can_view', 'can_add', 'can_edit', 'can_delete', 'allowed_actions',
+        ]

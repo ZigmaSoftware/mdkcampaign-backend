@@ -14,9 +14,10 @@ class VoterSimpleSerializer(serializers.ModelSerializer):
 
 class VoterSerializer(serializers.ModelSerializer):
     """Full voter details"""
-    booth_name   = serializers.CharField(source='booth.name',   read_only=True, default='')
-    village_name = serializers.CharField(source='village.name', read_only=True, default='')
-    party_name   = serializers.SerializerMethodField()
+    booth_name      = serializers.CharField(source='booth.name',      read_only=True, default='')
+    village_name    = serializers.CharField(source='village.name',    read_only=True, default='')
+    panchayat_name  = serializers.CharField(source='panchayat.name',  read_only=True, default='')
+    party_name      = serializers.SerializerMethodField()
 
     def get_party_name(self, obj):
         return obj.preferred_party.name if obj.preferred_party_id else ''
@@ -26,7 +27,7 @@ class VoterSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 'father_name', 'date_of_birth', 'gender', 'age',
             'voter_id', 'aadhaar', 'phone', 'phone2', 'alt_phoneno2', 'alt_phoneno3', 'email', 'booth', 'booth_name',
-            'village', 'village_name', 'address', 'latitude', 'longitude',
+            'village', 'village_name', 'panchayat', 'panchayat_name', 'address', 'pincode', 'latitude', 'longitude',
             'religion', 'caste', 'sub_caste', 'current_location', 'scheme_name', 'issue_name',
             'education_level', 'occupation', 'sentiment', 'preferred_party',
             'party_name', 'is_contacted', 'last_contacted_at', 'contact_count',
