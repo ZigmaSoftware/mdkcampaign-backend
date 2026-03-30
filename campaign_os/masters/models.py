@@ -241,6 +241,24 @@ class PollingArea(BaseModel):
         return f"{self.name} - {const_name}"
 
 
+class Union(BaseModel):
+    """Panchayat Union — grouped under a Block (PollingArea)"""
+    block = models.ForeignKey(
+        'masters.PollingArea', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='unions', db_constraint=False
+    )
+    name        = models.CharField(max_length=200)
+    code        = models.CharField(max_length=20, blank=True, null=True)
+    description = models.TextField(blank=True, null=True)
+
+    class Meta:
+        ordering = ['name']
+        verbose_name_plural = 'Unions'
+
+    def __str__(self):
+        return self.name
+
+
 class Candidate(BaseModel):
     """Political Candidate"""
     GENDER_CHOICES = [('m', 'Male'), ('f', 'Female'), ('o', 'Other')]
@@ -400,15 +418,15 @@ class CampaignActivityType(BaseModel):
 
 
 class Panchayat(BaseModel):
-    """Panchayat — local government unit within a Ward/Constituency"""
-    ward = models.ForeignKey(
-        'masters.Ward', on_delete=models.SET_NULL, null=True, blank=True,
-        related_name='panchayats', db_constraint=False
-    )
+    """Panchayat — local government unit within a Constituency"""
     CATEGORY_CHOICES = [
         ('village_panchayat', 'Village Panchayat'),
         ('town_panchayat',    'Town Panchayat'),
     ]
+    union       = models.ForeignKey(
+        'masters.Union', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='panchayats', db_constraint=False
+    )
     name        = models.CharField(max_length=200)
     code        = models.CharField(max_length=20, blank=True, null=True)
     category    = models.CharField(max_length=30, choices=CATEGORY_CHOICES, blank=True, null=True)
@@ -419,8 +437,7 @@ class Panchayat(BaseModel):
         verbose_name_plural = 'Panchayats'
 
     def __str__(self):
-        ward_name = self.ward.name if self.ward_id else '?'
-        return f"{self.name} ({ward_name})"
+        return self.name
 
 
 class VolunteerType(BaseModel):

@@ -4,7 +4,7 @@ Serializers for master data
 from rest_framework import serializers
 from campaign_os.masters.models import (
     Country, State, District, Constituency, Ward, Booth, PollingArea,
-    Candidate, Party, Scheme, Issue, Achievement, TaskCategory, CampaignActivityType, VolunteerRole, VolunteerType, Panchayat
+    Candidate, Party, Scheme, Issue, Achievement, TaskCategory, CampaignActivityType, VolunteerRole, VolunteerType, Panchayat, Union
 )
 from django.contrib.auth import get_user_model
 
@@ -133,23 +133,15 @@ class WardDetailSerializer(serializers.ModelSerializer):
 
 class BoothSimpleSerializer(serializers.ModelSerializer):
     """Minimal booth info"""
-    ward_name = serializers.CharField(source='ward.name', read_only=True, default='')
-    ward = serializers.PrimaryKeyRelatedField(
-        queryset=Ward.objects.all(), required=False, allow_null=True
-    )
 
     class Meta:
         model = Booth
-        fields = ['id', 'number', 'name', 'code', 'ward', 'ward_name', 'status']
+        fields = ['id', 'number', 'name', 'code', 'status']
 
 
 class BoothDetailSerializer(serializers.ModelSerializer):
     """Full booth details with coverage stats"""
-    ward_name      = serializers.CharField(source='ward.name',      read_only=True, default='')
     panchayat_name = serializers.CharField(source='panchayat.name', read_only=True, default='')
-    ward = serializers.PrimaryKeyRelatedField(
-        queryset=Ward.objects.all(), required=False, allow_null=True
-    )
     constituency_name = serializers.SerializerMethodField()
     primary_volunteer = serializers.PrimaryKeyRelatedField(read_only=True)
     agent_name = serializers.SerializerMethodField()
@@ -162,11 +154,9 @@ class BoothDetailSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Booth
-        # Remove auto-generated UniqueTogetherValidator for ['ward','number']
-        # which incorrectly marks ward as required. DB still enforces uniqueness.
         validators = []
         fields = [
-            'id', 'ward', 'ward_name', 'panchayat', 'panchayat_name', 'constituency_name', 'number', 'name', 'code',
+            'id', 'panchayat', 'panchayat_name', 'constituency_name', 'number', 'name', 'code',
             'address', 'village', 'latitude', 'longitude',
             'total_voters', 'male_voters', 'female_voters', 'third_gender_voters',
             'total_voters_calculated', 'primary_agent', 'agent_name',
@@ -177,7 +167,7 @@ class BoothDetailSerializer(serializers.ModelSerializer):
         ]
 
     def get_constituency_name(self, obj):
-        return obj.ward.constituency.name if obj.ward_id else ''
+        return ''
 
     def get_google_maps_url(self, obj):
         return obj.get_google_maps_url()
@@ -303,7 +293,7 @@ class AchievementSerializer(serializers.ModelSerializer):
 class CampaignActivityTypeSerializer(serializers.ModelSerializer):
     class Meta:
         model = CampaignActivityType
-        fields = ['id', 'name', 'event_type', 'description', 'order', 'is_active', 'created_at', 'updated_at']
+        fields = ['id', 'name', 'description', 'order', 'is_active', 'created_at', 'updated_at']
 
 
 class VolunteerRoleSerializer(serializers.ModelSerializer):
@@ -319,8 +309,16 @@ class VolunteerTypeSerializer(serializers.ModelSerializer):
 
 
 class PanchayatSerializer(serializers.ModelSerializer):
-    ward_name = serializers.CharField(source='ward.name', read_only=True)
+    union_name = serializers.CharField(source='union.name', read_only=True, default='')
 
     class Meta:
         model = Panchayat
-        fields = ['id', 'ward', 'ward_name', 'name', 'code', 'category', 'description', 'created_at', 'updated_at']
+        fields = ['id', 'union', 'union_name', 'name', 'code', 'category', 'description', 'created_at', 'updated_at']
+
+
+class UnionSerializer(serializers.ModelSerializer):
+    block_name = serializers.CharField(source='block.name', read_only=True, default='')
+
+    class Meta:
+        model = Union
+        fields = ['id', 'block', 'block_name', 'name', 'code', 'description', 'created_at', 'updated_at']

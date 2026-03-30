@@ -10,7 +10,7 @@ from django.db.models import Count, Q, IntegerField
 from django.db.models.functions import Cast
 from campaign_os.masters.models import (
     Country, State, District, Constituency, Ward, Booth, PollingArea,
-    Candidate, Party, Scheme, Issue, Achievement, TaskCategory, CampaignActivityType, VolunteerRole, VolunteerType, Panchayat
+    Candidate, Party, Scheme, Issue, Achievement, TaskCategory, CampaignActivityType, VolunteerRole, VolunteerType, Panchayat, Union
 )
 from campaign_os.masters.serializers import (
     CountrySerializer, StateSerializer, DistrictSimpleSerializer, DistrictDetailSerializer,
@@ -19,7 +19,7 @@ from campaign_os.masters.serializers import (
     BoothSimpleSerializer, BoothDetailSerializer, PollingAreaSerializer,
     PartySerializer, CandidateDetailSerializer, CandidateSimpleSerializer,
     SchemeSerializer, IssueSerializer, AchievementSerializer, TaskCategorySerializer,
-    CampaignActivityTypeSerializer, VolunteerRoleSerializer, VolunteerTypeSerializer, PanchayatSerializer
+    CampaignActivityTypeSerializer, VolunteerRoleSerializer, VolunteerTypeSerializer, PanchayatSerializer, UnionSerializer
 )
 from campaign_os.core.utils.bulk_upload import (
     parse_upload, BulkResult, resolve_by_code, to_int, to_str, to_bool
@@ -168,13 +168,13 @@ class BoothViewSet(viewsets.ModelViewSet):
     screen_slug = "booth-master"
     queryset = (
         Booth.objects.filter(is_active=True)
-             .select_related('ward', 'ward__constituency', 'primary_agent')
+             .select_related('panchayat', 'primary_agent')
              .prefetch_related('agents')
              .annotate(number_int=Cast('number', output_field=IntegerField()))
              .order_by('number_int')
     )
     permission_classes = [permissions.IsAuthenticated, ScreenPermission]
-    filterset_fields = ['ward', 'status', 'sentiment']
+    filterset_fields = ['status', 'sentiment']
     search_fields = ['name', 'number', 'code', 'address']
     ordering = ['number_int']
 
@@ -210,7 +210,7 @@ class BoothViewSet(viewsets.ModelViewSet):
         if not booth.latitude or not booth.longitude:
             return Response({'detail': 'Booth location not available'})
         nearby = Booth.objects.filter(
-            ward__constituency=booth.ward.constituency if booth.ward_id else None,
+            panchayat=booth.panchayat,
             is_active=True
         ).exclude(id=booth.id)[:10]
         return Response(BoothSimpleSerializer(nearby, many=True).data)
@@ -221,7 +221,7 @@ class BoothViewSet(viewsets.ModelViewSet):
     def bulk_upload(self, request):
         """
         CSV columns:
-          code (required), number, name, ward_code,
+          code (required), number, name,
           address, village, total_voters, male_voters, female_voters,
           third_gender_voters, status, sentiment, notes, volunteer_name
         """
@@ -234,7 +234,6 @@ class BoothViewSet(viewsets.ModelViewSet):
             if not code:
                 result.fail(i, 'code is required'); continue
             try:
-                ward_id = resolve_by_code(Ward, row.get('ward_code', ''))
                 # resolve primary_volunteer by name
                 vol_name = to_str(row.get('volunteer_name'))
                 primary_volunteer_id = None
@@ -248,7 +247,6 @@ class BoothViewSet(viewsets.ModelViewSet):
                     defaults={
                         'number':               to_str(row.get('number'))  or None,
                         'name':                 to_str(row.get('name'))    or None,
-                        'ward_id':              ward_id,
                         'address':              to_str(row.get('address')) or None,
                         'village':              to_str(row.get('village')) or None,
                         'total_voters':         to_int(row.get('total_voters'))         or 0,
@@ -486,14 +484,28 @@ class VolunteerRoleViewSet(viewsets.ModelViewSet):
         instance.save()
 
 
+class UnionViewSet(viewsets.ModelViewSet):
+    screen_slug = 'union'
+    queryset = Union.objects.filter(is_active=True).select_related('block').order_by('name')
+    serializer_class = UnionSerializer
+    permission_classes = [permissions.IsAuthenticated, ScreenPermission]
+    filter_backends = [filters.SearchFilter, DjangoFilterBackend]
+    search_fields = ['name', 'code']
+    filterset_fields = ['block']
+
+    def perform_destroy(self, instance):
+        instance.is_active = False
+        instance.save()
+
+
 class PanchayatViewSet(viewsets.ModelViewSet):
     screen_slug = 'panchayat'
-    queryset = Panchayat.objects.filter(is_active=True).select_related('ward').order_by('name')
+    queryset = Panchayat.objects.filter(is_active=True).select_related('union').order_by('name')
     serializer_class = PanchayatSerializer
     permission_classes = [permissions.IsAuthenticated, ScreenPermission]
     filter_backends = [filters.SearchFilter, DjangoFilterBackend]
     search_fields = ['name', 'code']
-    filterset_fields = ['ward']
+    filterset_fields = ['union']
 
     def perform_destroy(self, instance):
         instance.is_active = False

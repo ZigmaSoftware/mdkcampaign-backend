@@ -22,6 +22,7 @@ router.register(r'campaign-activity-types', views.CampaignActivityTypeViewSet, b
 router.register(r'volunteer-roles', views.VolunteerRoleViewSet, basename='volunteer_role')
 router.register(r'volunteer-types', views.VolunteerTypeViewSet, basename='volunteer_type')
 router.register(r'panchayats', views.PanchayatViewSet, basename='panchayat')
+router.register(r'unions', views.UnionViewSet, basename='union')
 
 urlpatterns = [
     path('', include(router.urls)),
