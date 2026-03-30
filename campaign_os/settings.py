@@ -91,7 +91,7 @@ DATABASES = {
         'NAME': 'campaign_os',
         'USER': 'root',
         # 'PASSWORD': 'Su$i0410',
-        'PASSWORD': 'admin@123'
+        'PASSWORD': 'admin@123',
 
         'HOST': 'localhost',
         'PORT': '3306',
