@@ -48,6 +48,11 @@ class VoterViewSet(viewsets.ModelViewSet):
         if union_param and union_param.isdigit():
             qs = qs.filter(booth__panchayat__union_id=union_param)
 
+        # Block filter: ?block=3 (filters via booth__panchayat__union__block_id)
+        block_param = self.request.query_params.get('block', '')
+        if block_param and block_param.isdigit():
+            qs = qs.filter(booth__panchayat__union__block_id=block_param)
+
         # Support date filter on created_at: ?created_date=2026-03-28
         created_date = self.request.query_params.get('created_date', '')
         if created_date:
