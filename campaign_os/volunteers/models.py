@@ -30,15 +30,12 @@ class Volunteer(BaseModel):
         'masters.Ward', on_delete=models.SET_NULL, null=True, blank=True,
         related_name='volunteers', db_constraint=False
     )
-    # Profile
-    VOLUNTEER_TYPE_CHOICES = [
-        ('paid_volunteer',         'Paid Volunteer'),
-        ('social_media_volunteer', 'Social Media Volunteer'),
-        ('alliance_volunteer',     'Alliance Volunteer'),
-    ]
-    volunteer_type = models.CharField(
-        max_length=30, choices=VOLUNTEER_TYPE_CHOICES, blank=True, null=True, default='',
+    panchayat = models.ForeignKey(
+        'masters.Panchayat', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='volunteers', db_constraint=False
     )
+    # Profile — open CharField so user-defined VolunteerType master values are accepted
+    volunteer_type = models.CharField(max_length=100, blank=True, null=True, default='')
 
     block       = models.CharField(max_length=100, blank=True, null=True)
     role        = models.CharField(max_length=100, blank=True, null=True)

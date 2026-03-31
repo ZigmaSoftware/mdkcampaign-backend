@@ -38,6 +38,16 @@ class VoterViewSet(viewsets.ModelViewSet):
         if ward_param and ward_param.isdigit():
             qs = qs.filter(booth__ward_id=ward_param)
 
+        # Panchayat filter: ?panchayat=12 (filters via booth__panchayat_id)
+        panchayat_param = self.request.query_params.get('panchayat', '')
+        if panchayat_param and panchayat_param.isdigit():
+            qs = qs.filter(booth__panchayat_id=panchayat_param)
+
+        # Union filter: ?union=5 (filters via booth__panchayat__union_id)
+        union_param = self.request.query_params.get('union', '')
+        if union_param and union_param.isdigit():
+            qs = qs.filter(booth__panchayat__union_id=union_param)
+
         # Support date filter on created_at: ?created_date=2026-03-28
         created_date = self.request.query_params.get('created_date', '')
         if created_date:

@@ -15,6 +15,7 @@ api_v1_patterns = [
     path('campaigns/', include('campaign_os.campaigns.urls')),
     path('analytics/',  include('campaign_os.analytics.urls')),
     path('activities/',   include('campaign_os.activities.urls')),
+    path('beneficiaries/', include('campaign_os.beneficiaries.urls')),
     path('attendance/',   include('campaign_os.attendance.urls')),
     path('polls/',        include('campaign_os.polls.urls')),
     path('telecalling/',  include('campaign_os.telecalling.urls')),

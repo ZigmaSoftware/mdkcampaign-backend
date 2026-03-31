@@ -19,7 +19,7 @@ class VolunteerViewSet(viewsets.ModelViewSet):
     screen_slug = 'volunteer'
     queryset = Volunteer.objects.filter(is_active=True).select_related(
         'user', 'booth__panchayat__union__block'
-    )
+    ).prefetch_related('booths__panchayat__union')
     serializer_class = VolunteerSerializer
     permission_classes = [permissions.IsAuthenticated, ScreenPermission]
     filterset_fields = ['booth', 'status', 'ward']

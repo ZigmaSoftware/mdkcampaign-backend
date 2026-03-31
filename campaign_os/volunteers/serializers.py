@@ -38,15 +38,22 @@ class VolunteerSerializer(serializers.ModelSerializer):
     def get_booth_names(self, obj):
         return list(obj.booths.values_list('name', flat=True))
 
+    def _effective_booth(self, obj):
+        """Return primary booth FK if set, else the first M2M booth (uses prefetch cache)."""
+        if obj.booth_id:
+            return obj.booth
+        booths = obj.booths.all()   # hits prefetch cache — no extra query
+        return booths[0] if booths else None
+
     def get_panchayat_name(self, obj):
         try:
-            return obj.booth.panchayat.name or ''
+            return self._effective_booth(obj).panchayat.name or ''
         except AttributeError:
             return ''
 
     def get_union_name(self, obj):
         try:
-            return obj.booth.panchayat.union.name or ''
+            return self._effective_booth(obj).panchayat.union.name or ''
         except AttributeError:
             return ''
 

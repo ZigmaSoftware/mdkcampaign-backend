@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     'campaign_os.campaigns',
     'campaign_os.analytics',
     'campaign_os.activities',
+    'campaign_os.beneficiaries',
     'campaign_os.attendance',
     'campaign_os.polls',
     'campaign_os.telecalling',
