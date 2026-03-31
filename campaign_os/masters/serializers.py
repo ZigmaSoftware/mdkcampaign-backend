@@ -133,14 +133,16 @@ class WardDetailSerializer(serializers.ModelSerializer):
 
 class BoothSimpleSerializer(serializers.ModelSerializer):
     """Minimal booth info"""
+    ward_name = serializers.CharField(source='ward.name', read_only=True, default=None)
 
     class Meta:
         model = Booth
-        fields = ['id', 'number', 'name', 'code', 'status', 'panchayat']
+        fields = ['id', 'number', 'name', 'code', 'status', 'panchayat', 'ward', 'ward_name']
 
 
 class BoothDetailSerializer(serializers.ModelSerializer):
     """Full booth details with coverage stats"""
+    ward_name      = serializers.CharField(source='ward.name',      read_only=True, default=None)
     panchayat_name = serializers.CharField(source='panchayat.name', read_only=True, default='')
     constituency_name = serializers.SerializerMethodField()
     primary_volunteer = serializers.PrimaryKeyRelatedField(read_only=True)
@@ -156,7 +158,7 @@ class BoothDetailSerializer(serializers.ModelSerializer):
         model = Booth
         validators = []
         fields = [
-            'id', 'panchayat', 'panchayat_name', 'constituency_name', 'number', 'name', 'code',
+            'id', 'ward', 'ward_name', 'panchayat', 'panchayat_name', 'constituency_name', 'number', 'name', 'code',
             'address', 'village', 'latitude', 'longitude',
             'total_voters', 'male_voters', 'female_voters', 'third_gender_voters',
             'total_voters_calculated', 'primary_agent', 'agent_name',

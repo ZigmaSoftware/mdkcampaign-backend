@@ -259,6 +259,8 @@ class UserScreen(models.Model):
 class UserScreenPermission(models.Model):
     """
     CRUD-level permission: which actions a role can perform on a UserScreen.
+    The `role` field accepts both system user roles (admin, volunteer, …) and
+    volunteer-type slugs (party_worker, alliance_volunteer, …).
     Response shape delivered to the frontend:
         {
           "main_screen_slug": {
@@ -266,7 +268,7 @@ class UserScreenPermission(models.Model):
           }
         }
     """
-    role        = models.CharField(max_length=20, choices=User.ROLE_CHOICES, db_index=True)
+    role        = models.CharField(max_length=50, db_index=True)
     user_screen = models.ForeignKey(UserScreen, on_delete=models.CASCADE, related_name='permissions')
     can_view    = models.BooleanField(default=False)
     can_add     = models.BooleanField(default=False)

@@ -7,7 +7,10 @@ Usage:
 This seeds:
   - All main screens (Entry, Masters Config, Reports, Opinion Poll)
   - All sub-screens for each main screen (master forms + entry forms)
-  - Default CRUD permissions for roles: admin, volunteer, member
+  - Default CRUD permissions for system roles: admin, volunteer, district_head, …
+  - Default CRUD permissions for volunteer types:
+      party_worker, alliance_volunteer, paid_volunteer, social_media_volunteer,
+      community_leader, women_volunteer, youth_volunteer, temporary_volunteer
 """
 from django.core.management.base import BaseCommand
 from campaign_os.accounts.models import MainScreen, UserScreen, UserScreenPermission
@@ -46,6 +49,7 @@ USER_SCREENS = [
     ('entry', 'assign-telecalling',  'Assign Telecalling',   'ph ph-phone-outgoing',      18),
     ('entry', 'telecalling-assigned','Telecalling Assigned', 'ph ph-clipboard-text',      19),
     ('entry', 'feedback-review',     'Feedback Review',      'ph ph-git-branch',          20),
+    ('entry', 'beneficiary',         'Beneficiary',          'ph ph-hand-heart',           21),
 
     # ── Master forms ──────────────────────────────────────────────────────────
     ('masters-config', 'district',          'District',          'ph ph-map-trifold',  1),
@@ -58,9 +62,13 @@ USER_SCREENS = [
     ('masters-config', 'candidate',         'Candidate',         'ph ph-user-circle',  8),
     ('masters-config', 'party',             'Party',             'ph ph-flag',         9),
     ('masters-config', 'task-category',     'Task Category',     'ph ph-tag',          10),
-    ('masters-config', 'campaign-activity', 'Campaign Activity', 'ph ph-megaphone',    11),
-    ('masters-config', 'user-mgmt',         'User Management',   'ph ph-user-gear',    12),
-    ('masters-config', 'permissions',       'Permissions',       'ph ph-shield-check', 13),
+    ('masters-config', 'campaign-activity', 'Campaign Activity', 'ph ph-megaphone',            11),
+    ('masters-config', 'volunteer-role',    'Vol. Roles',        'ph ph-identification-badge', 12),
+    ('masters-config', 'volunteer-type',    'Vol. Types',        'ph ph-tag',                  13),
+    ('masters-config', 'panchayat',         'Panchayat',         'ph ph-tree-structure',        14),
+    ('masters-config', 'union',             'Union',             'ph ph-buildings',             15),
+    ('masters-config', 'user-mgmt',         'User Management',   'ph ph-user-gear',             16),
+    ('masters-config', 'permissions',       'Permissions',       'ph ph-shield-check',          17),
 
     # ── Report sub-screens ────────────────────────────────────────────────────
     ('report', 'report-overview',   'Report Overview',   'ph ph-chart-pie',    1),
@@ -80,7 +88,8 @@ USER_SCREENS = [
 # Format: (role, screen_slug, can_view, can_add, can_edit, can_delete)
 # Geographic master slugs that operational roles need view access to for form dropdowns
 _GEO_MASTERS = ['district', 'constituency', 'ward', 'area', 'booth-master',
-                 'party', 'candidate', 'scheme', 'task-category', 'campaign-activity']
+                 'party', 'candidate', 'scheme', 'task-category', 'campaign-activity',
+                 'volunteer-role', 'volunteer-type', 'panchayat', 'union']
 
 ROLE_PERMISSIONS = [
     # ── admin: full access to everything ────────────────────────────────────
@@ -89,6 +98,7 @@ ROLE_PERMISSIONS = [
     # ── volunteer: entry data with limited CRUD ──────────────────────────────
     # Geographic masters — view-only (needed for dropdown lookups in forms)
     *[('volunteer', slug, True, False, False, False) for slug in _GEO_MASTERS],
+    ('volunteer', 'beneficiary',        True,  True,  True,  False),
     ('volunteer', 'voter',              True,  True,  True,  False),
     ('volunteer', 'booth',              True,  False, False, False),
     ('volunteer', 'volunteer',          True,  True,  True,  False),
@@ -105,6 +115,7 @@ ROLE_PERMISSIONS = [
 
     # ── member: read-only on core data + poll participation ──────────────────
     *[('member', slug, True, False, False, False) for slug in _GEO_MASTERS],
+    ('member', 'beneficiary',    True,  False, False, False),
     ('member', 'voter',          True,  False, False, False),
     ('member', 'booth',          True,  False, False, False),
     ('member', 'campaign',       True,  False, False, False),
@@ -116,6 +127,7 @@ ROLE_PERMISSIONS = [
     # Geographic masters — view-only for dropdowns + manage district/constituency
     *[('district_head', slug, True, False, False, False) for slug in _GEO_MASTERS],
     ('district_head', 'user-mgmt',          True, True,  True,  False),
+    ('district_head', 'beneficiary',        True, True,  True,  True),
     ('district_head', 'voter',              True, True,  True,  True),
     ('district_head', 'booth',              True, True,  True,  False),
     ('district_head', 'volunteer',          True, True,  True,  True),
@@ -139,6 +151,7 @@ ROLE_PERMISSIONS = [
     # ── constituency_mgr: same as district_head ──────────────────────────────
     *[('constituency_mgr', slug, True, False, False, False) for slug in _GEO_MASTERS],
     ('constituency_mgr', 'user-mgmt',          True, True,  True,  False),
+    ('constituency_mgr', 'beneficiary',        True, True,  True,  True),
     ('constituency_mgr', 'voter',              True, True,  True,  True),
     ('constituency_mgr', 'booth',              True, True,  True,  False),
     ('constituency_mgr', 'volunteer',          True, True,  True,  True),
@@ -159,6 +172,7 @@ ROLE_PERMISSIONS = [
 
     # ── booth_agent: limited field ops ───────────────────────────────────────
     *[('booth_agent', slug, True, False, False, False) for slug in _GEO_MASTERS],
+    ('booth_agent', 'beneficiary',    True, True,  False, False),
     ('booth_agent', 'voter',          True, True,  True,  False),
     ('booth_agent', 'booth',          True, False, False, False),
     ('booth_agent', 'agent-activity', True, True,  True,  False),
@@ -190,6 +204,104 @@ ROLE_PERMISSIONS = [
     ('observer', 'voter-report',     True, False, False, False),
     ('observer', 'poll-questions',   True, False, False, False),
     ('observer', 'poll-results',     True, False, False, False),
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # VOLUNTEER TYPE PERMISSIONS
+    # Slugs match Volunteer.volunteer_type lowercased + spaces→underscore
+    # ══════════════════════════════════════════════════════════════════════════
+
+    # ── party_worker: full-time dedicated party worker — broad field access ──
+    *[('party_worker', slug, True, False, False, False) for slug in _GEO_MASTERS],
+    ('party_worker', 'voter',              True,  True,  True,  False),
+    ('party_worker', 'booth',              True,  True,  False, False),
+    ('party_worker', 'volunteer',          True,  True,  True,  False),
+    ('party_worker', 'beneficiary',        True,  True,  True,  False),
+    ('party_worker', 'event',              True,  True,  True,  False),
+    ('party_worker', 'campaign',           True,  True,  False, False),
+    ('party_worker', 'feedback',           True,  True,  True,  False),
+    ('party_worker', 'commitment',         True,  True,  False, False),
+    ('party_worker', 'grievance',          True,  True,  False, False),
+    ('party_worker', 'field-activity',     True,  True,  True,  False),
+    ('party_worker', 'volunteer-activity', True,  True,  True,  False),
+    ('party_worker', 'voter-survey',       True,  True,  False, False),
+    ('party_worker', 'attendance',         True,  True,  False, False),
+    ('party_worker', 'assign-telecalling', True,  True,  False, False),
+    ('party_worker', 'poll-questions',     True,  False, False, False),
+    ('party_worker', 'poll-results',       True,  False, False, False),
+
+    # ── alliance_volunteer: contributed by allied party — limited access ──────
+    *[('alliance_volunteer', slug, True, False, False, False) for slug in _GEO_MASTERS],
+    ('alliance_volunteer', 'voter',              True,  True,  False, False),
+    ('alliance_volunteer', 'booth',              True,  False, False, False),
+    ('alliance_volunteer', 'volunteer',          True,  True,  False, False),
+    ('alliance_volunteer', 'volunteer-activity', True,  True,  False, False),
+    ('alliance_volunteer', 'voter-survey',       True,  True,  False, False),
+    ('alliance_volunteer', 'attendance',         True,  True,  False, False),
+    ('alliance_volunteer', 'poll-questions',     True,  False, False, False),
+    ('alliance_volunteer', 'poll-results',       True,  False, False, False),
+
+    # ── paid_volunteer: receives stipend — dedicated data entry ops ───────────
+    *[('paid_volunteer', slug, True, False, False, False) for slug in _GEO_MASTERS],
+    ('paid_volunteer', 'voter',              True,  True,  True,  False),
+    ('paid_volunteer', 'booth',              True,  True,  False, False),
+    ('paid_volunteer', 'beneficiary',        True,  True,  True,  False),
+    ('paid_volunteer', 'volunteer',          True,  True,  False, False),
+    ('paid_volunteer', 'event',              True,  True,  False, False),
+    ('paid_volunteer', 'campaign',           True,  False, False, False),
+    ('paid_volunteer', 'feedback',           True,  True,  False, False),
+    ('paid_volunteer', 'volunteer-activity', True,  True,  False, False),
+    ('paid_volunteer', 'voter-survey',       True,  True,  False, False),
+    ('paid_volunteer', 'attendance',         True,  True,  False, False),
+    ('paid_volunteer', 'assign-telecalling', True,  True,  False, False),
+    ('paid_volunteer', 'poll-questions',     True,  False, False, False),
+    ('paid_volunteer', 'poll-results',       True,  False, False, False),
+
+    # ── social_media_volunteer: WhatsApp / online campaign only ──────────────
+    *[('social_media_volunteer', slug, True, False, False, False) for slug in _GEO_MASTERS],
+    ('social_media_volunteer', 'campaign',           True,  True,  False, False),
+    ('social_media_volunteer', 'feedback',           True,  True,  False, False),
+    ('social_media_volunteer', 'voter-survey',       True,  True,  False, False),
+    ('social_media_volunteer', 'poll-questions',     True,  False, False, False),
+    ('social_media_volunteer', 'poll-results',       True,  False, False, False),
+
+    # ── community_leader: caste/community influencer — people management ──────
+    *[('community_leader', slug, True, False, False, False) for slug in _GEO_MASTERS],
+    ('community_leader', 'voter',              True,  True,  True,  False),
+    ('community_leader', 'booth',              True,  False, False, False),
+    ('community_leader', 'volunteer',          True,  True,  True,  False),
+    ('community_leader', 'beneficiary',        True,  True,  True,  False),
+    ('community_leader', 'feedback',           True,  True,  False, False),
+    ('community_leader', 'commitment',         True,  True,  False, False),
+    ('community_leader', 'grievance',          True,  True,  False, False),
+    ('community_leader', 'voter-survey',       True,  True,  False, False),
+    ('community_leader', 'attendance',         True,  True,  False, False),
+    ('community_leader', 'poll-questions',     True,  False, False, False),
+    ('community_leader', 'poll-results',       True,  False, False, False),
+
+    # ── women_volunteer: women wing / community ───────────────────────────────
+    *[('women_volunteer', slug, True, False, False, False) for slug in _GEO_MASTERS],
+    ('women_volunteer', 'voter',              True,  True,  False, False),
+    ('women_volunteer', 'beneficiary',        True,  True,  False, False),
+    ('women_volunteer', 'voter-survey',       True,  True,  False, False),
+    ('women_volunteer', 'attendance',         True,  True,  False, False),
+    ('women_volunteer', 'poll-questions',     True,  False, False, False),
+    ('women_volunteer', 'poll-results',       True,  False, False, False),
+
+    # ── youth_volunteer: college/school student or youth wing ─────────────────
+    *[('youth_volunteer', slug, True, False, False, False) for slug in _GEO_MASTERS],
+    ('youth_volunteer', 'voter',              True,  True,  False, False),
+    ('youth_volunteer', 'campaign',           True,  True,  False, False),
+    ('youth_volunteer', 'voter-survey',       True,  True,  False, False),
+    ('youth_volunteer', 'attendance',         True,  True,  False, False),
+    ('youth_volunteer', 'poll-questions',     True,  False, False, False),
+    ('youth_volunteer', 'poll-results',       True,  False, False, False),
+
+    # ── temporary_volunteer: short-term / event-specific ─────────────────────
+    *[('temporary_volunteer', slug, True, False, False, False) for slug in _GEO_MASTERS],
+    ('temporary_volunteer', 'voter-survey',   True,  True,  False, False),
+    ('temporary_volunteer', 'attendance',     True,  True,  False, False),
+    ('temporary_volunteer', 'poll-questions', True,  False, False, False),
+    ('temporary_volunteer', 'poll-results',   True,  False, False, False),
 ]
 
 

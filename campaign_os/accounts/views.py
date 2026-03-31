@@ -202,6 +202,9 @@ class PagePermissionViewSet(viewsets.ModelViewSet):
         """
         Return the current user's page access list AND screen-level CRUD permissions.
 
+        For volunteers the lookup key is their volunteer_type slug
+        (e.g. "party_worker") when one exists; otherwise falls back to "volunteer".
+
         Response shape:
         {
           "role": "admin",
@@ -216,6 +219,18 @@ class PagePermissionViewSet(viewsets.ModelViewSet):
         }
         """
         role = request.user.role
+
+        # For volunteer users, try to resolve their specific volunteer-type slug
+        if role == 'volunteer':
+            try:
+                from campaign_os.volunteers.models import Volunteer
+                vol = Volunteer.objects.filter(user=request.user).first()
+                if vol and vol.volunteer_type:
+                    vol_type_slug = vol.volunteer_type.strip().lower().replace(' ', '_')
+                    if UserScreenPermission.objects.filter(role=vol_type_slug).exists():
+                        role = vol_type_slug
+            except Exception:
+                pass  # Fall back to generic 'volunteer'
 
         # Build screen_permissions and derive allowed_pages from UserScreenPermission
         perms = (

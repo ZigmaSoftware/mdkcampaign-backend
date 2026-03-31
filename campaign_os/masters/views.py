@@ -124,7 +124,7 @@ class WardViewSet(viewsets.ModelViewSet):
     screen_slug = "ward"
     queryset = Ward.objects.filter(is_active=True).select_related('constituency')
     permission_classes = [permissions.IsAuthenticated, ScreenPermission]
-    filterset_fields = ['constituency']
+    filterset_fields = ['constituency', 'booths']
     search_fields = ['name', 'code']
 
     def get_serializer_class(self):
@@ -168,7 +168,7 @@ class BoothViewSet(viewsets.ModelViewSet):
     screen_slug = "booth-master"
     queryset = (
         Booth.objects.filter(is_active=True)
-             .select_related('panchayat', 'primary_agent')
+             .select_related('panchayat', 'primary_agent', 'ward')
              .prefetch_related('agents')
              .annotate(number_int=Cast('number', output_field=IntegerField()))
              .order_by('number_int')
