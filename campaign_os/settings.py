@@ -138,7 +138,7 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticated',
     ),
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.LimitOffsetPagination',
-    'PAGE_SIZE': 50,
+    'PAGE_SIZE': 800,
     'DEFAULT_FILTER_BACKENDS': (
         'django_filters.rest_framework.DjangoFilterBackend',
         'rest_framework.filters.SearchFilter',
@@ -196,8 +196,9 @@ LOGGING = {
 
 
 # Large file upload support
-DATA_UPLOAD_MAX_MEMORY_SIZE = 52428800   # 50 MB
-FILE_UPLOAD_MAX_MEMORY_SIZE = 52428800   # 50 MB
+DATA_UPLOAD_MAX_MEMORY_SIZE    = 52428800   # 50 MB
+FILE_UPLOAD_MAX_MEMORY_SIZE    = 52428800   # 50 MB
+DATA_UPLOAD_MAX_NUMBER_FIELDS  = 25000      # allow large CSV imports (default Django limit is 1000)
 
 # Frontend URL used for short poll URL redirects (no trailing slash)
 FRONTEND_URL  = config('FRONTEND_URL',  default='http://192.168.1.157.nip.io:8973')
