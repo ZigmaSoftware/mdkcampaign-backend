@@ -91,8 +91,8 @@ DATABASES = {
         'ENGINE': 'django.db.backends.mysql',
         'NAME': 'campaign_os',
         'USER': 'root',
-        # 'PASSWORD': 'Su$i0410',
-        'PASSWORD': 'admin@123',
+        'PASSWORD': 'Su$i0410',
+        # 'PASSWORD': 'admin@123',
 
         'HOST': 'localhost',
         'PORT': '3306',
@@ -137,8 +137,10 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
     ),
-    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.LimitOffsetPagination',
-    'PAGE_SIZE': 800,
+    # 'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.LimitOffsetPagination',
+    # 'PAGE_SIZE': 800,
+    'DEFAULT_PAGINATION_CLASS': None,
+
     'DEFAULT_FILTER_BACKENDS': (
         'django_filters.rest_framework.DjangoFilterBackend',
         'rest_framework.filters.SearchFilter',
