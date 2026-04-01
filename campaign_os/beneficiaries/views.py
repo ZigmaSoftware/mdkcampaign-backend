@@ -24,7 +24,11 @@ class BeneficiaryViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
-        search = self.request.query_params.get('search', '').strip()
+        params = self.request.query_params
+        search    = params.get('search',    '').strip()
+        block     = params.get('block',     '').strip()
+        panchayat = params.get('panchayat', '').strip()
+        union     = params.get('union',     '').strip()
         if search:
             q = (
                 Q(name__icontains=search) |
@@ -42,6 +46,12 @@ class BeneficiaryViewSet(viewsets.ModelViewSet):
             if search.isdigit():
                 q |= Q(age=int(search))
             qs = qs.filter(q)
+        if block:
+            qs = qs.filter(block__iexact=block)
+        if panchayat:
+            qs = qs.filter(booth__panchayat__name__iexact=panchayat)
+        if union:
+            qs = qs.filter(booth__panchayat__union__name__iexact=union)
         return qs
 
     def perform_create(self, serializer):

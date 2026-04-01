@@ -10,7 +10,7 @@ from django.db.models import Count, Q, IntegerField
 from django.db.models.functions import Cast
 from campaign_os.masters.models import (
     Country, State, District, Constituency, Ward, Booth, PollingArea,
-    Candidate, Party, Scheme, Issue, Achievement, TaskCategory, CampaignActivityType, VolunteerRole, VolunteerType, Panchayat, Union
+    Candidate, Party, Scheme, Issue, Achievement, TaskType, TaskCategory, CampaignActivityType, VolunteerRole, VolunteerType, Panchayat, Union
 )
 from campaign_os.masters.serializers import (
     CountrySerializer, StateSerializer, DistrictSimpleSerializer, DistrictDetailSerializer,
@@ -18,7 +18,7 @@ from campaign_os.masters.serializers import (
     WardSimpleSerializer, WardDetailSerializer,
     BoothSimpleSerializer, BoothDetailSerializer, PollingAreaSerializer,
     PartySerializer, CandidateDetailSerializer, CandidateSimpleSerializer,
-    SchemeSerializer, IssueSerializer, AchievementSerializer, TaskCategorySerializer,
+    SchemeSerializer, IssueSerializer, AchievementSerializer, TaskTypeSerializer, TaskCategorySerializer,
     CampaignActivityTypeSerializer, VolunteerRoleSerializer, VolunteerTypeSerializer, PanchayatSerializer, UnionSerializer
 )
 from campaign_os.core.utils.bulk_upload import (
@@ -426,11 +426,34 @@ class AchievementViewSet(viewsets.ModelViewSet):
 
 
 
+class TaskTypeViewSet(viewsets.ModelViewSet):
+    # Reuse task-category screen permissions so non-admin users who can manage
+    # task masters can also access task types without new permission seeding.
+    screen_slug = 'task-category'
+    queryset = TaskType.objects.filter(is_active=True).order_by('order', 'name')
+    serializer_class = TaskTypeSerializer
+    permission_classes = [permissions.IsAuthenticated, ScreenPermission]
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['name']
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+    def perform_update(self, serializer):
+        serializer.save(updated_by=self.request.user)
+
+    def perform_destroy(self, instance):
+        instance.is_active = False
+        instance.save()
+
+
 class TaskCategoryViewSet(viewsets.ModelViewSet):
     screen_slug = "task-category"
-    queryset = TaskCategory.objects.filter(is_active=True)
+    queryset = TaskCategory.objects.filter(is_active=True).select_related('task_type')
     serializer_class = TaskCategorySerializer
     permission_classes = [permissions.IsAuthenticated, ScreenPermission]
+    filter_backends = [filters.SearchFilter, DjangoFilterBackend]
+    filterset_fields = ['task_type']
     search_fields = ['name']
     ordering = ['priority', 'name']
 

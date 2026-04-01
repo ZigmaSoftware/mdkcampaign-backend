@@ -145,6 +145,10 @@ class Task(BaseModel):
         ('cancelled',   'Cancelled'),
     ]
 
+    task_type         = models.ForeignKey(
+        'masters.TaskType', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='tasks', db_constraint=False,
+    )
     title             = models.CharField(max_length=200, null=True, blank=True)
     category          = models.CharField(max_length=30, choices=CATEGORY_CHOICES, default='other', null=True, blank=True)
     task_category     = models.ForeignKey(
@@ -155,6 +159,32 @@ class Task(BaseModel):
     expected_datetime = models.DateTimeField(null=True, blank=True)
     venue             = models.CharField(max_length=300, blank=True, null=True)
 
+    # Location (all optional)
+    block     = models.ForeignKey(
+        'masters.PollingArea', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='tasks', db_constraint=False,
+    )
+    union     = models.ForeignKey(
+        'masters.Union', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='tasks', db_constraint=False,
+    )
+    panchayat = models.ForeignKey(
+        'masters.Panchayat', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='tasks', db_constraint=False,
+    )
+    booth     = models.ForeignKey(
+        'masters.Booth', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='tasks', db_constraint=False,
+    )
+    ward      = models.ForeignKey(
+        'masters.Ward', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='tasks', db_constraint=False,
+    )
+
+    volunteer_role = models.ForeignKey(
+        'masters.VolunteerRole', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='tasks', db_constraint=False,
+    )
     delivery_incharge = models.ForeignKey(
         'accounts.User', on_delete=models.SET_NULL, null=True, blank=True,
         related_name='incharge_tasks', db_constraint=False,

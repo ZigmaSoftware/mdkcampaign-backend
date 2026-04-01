@@ -4,7 +4,7 @@ Serializers for master data
 from rest_framework import serializers
 from campaign_os.masters.models import (
     Country, State, District, Constituency, Ward, Booth, PollingArea,
-    Candidate, Party, Scheme, Issue, Achievement, TaskCategory, CampaignActivityType, VolunteerRole, VolunteerType, Panchayat, Union
+    Candidate, Party, Scheme, Issue, Achievement, TaskType, TaskCategory, CampaignActivityType, VolunteerRole, VolunteerType, Panchayat, Union
 )
 from django.contrib.auth import get_user_model
 
@@ -271,11 +271,44 @@ class IssueSerializer(serializers.ModelSerializer):
         ]
 
 
+class TaskTypeSerializer(serializers.ModelSerializer):
+    """Task Type master"""
+    status = serializers.ChoiceField(
+        choices=[('active', 'Active'), ('inactive', 'Inactive')],
+        required=False,
+        write_only=True,
+        help_text='active / inactive',
+    )
+
+    class Meta:
+        model = TaskType
+        fields = ['id', 'name', 'status', 'description', 'order', 'created_at', 'updated_at']
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data['status'] = 'active' if instance.is_active else 'inactive'
+        return data
+
+    def create(self, validated_data):
+        status_value = validated_data.pop('status', None)
+        if status_value is not None:
+            validated_data['is_active'] = status_value == 'active'
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        status_value = validated_data.pop('status', None)
+        if status_value is not None:
+            validated_data['is_active'] = status_value == 'active'
+        return super().update(instance, validated_data)
+
+
 class TaskCategorySerializer(serializers.ModelSerializer):
     """Task Category master"""
+    task_type_name = serializers.CharField(source='task_type.name', read_only=True, default='')
+
     class Meta:
         model = TaskCategory
-        fields = ['id', 'name', 'description', 'color', 'icon', 'priority', 'created_at', 'updated_at']
+        fields = ['id', 'task_type', 'task_type_name', 'name', 'description', 'color', 'icon', 'priority', 'created_at', 'updated_at']
 
 
 class AchievementSerializer(serializers.ModelSerializer):

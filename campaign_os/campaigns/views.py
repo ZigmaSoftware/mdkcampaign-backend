@@ -86,19 +86,33 @@ class CampaignEventViewSet(viewsets.ModelViewSet):
 class TaskViewSet(viewsets.ModelViewSet):
     screen_slug = 'event'
     queryset = Task.objects.filter(is_active=True).select_related(
-        'delivery_incharge', 'coordinator', 'task_category'
+        'delivery_incharge', 'coordinator', 'task_type', 'task_category',
+        'volunteer_role', 'block', 'union', 'panchayat', 'booth', 'ward'
     )
     serializer_class = TaskSerializer
     permission_classes = [permissions.IsAuthenticated, ScreenPermission]
-    filterset_fields = ['status', 'category', 'task_category']
-    search_fields = ['title', 'venue']
+    filterset_fields = ['status', 'category', 'task_type', 'task_category', 'block', 'union', 'panchayat', 'booth', 'ward']
+    search_fields = [
+        'title', 'venue',
+        'task_type__name', 'task_category__name',
+        'block__name', 'union__name', 'panchayat__name', 'booth__name', 'ward__name',
+    ]
     ordering_fields = ['expected_datetime', 'created_at']
     ordering = ['expected_datetime']
 
     def get_queryset(self):
         qs = super().get_queryset()
-        date_from = self.request.query_params.get('date_from')
-        date_to   = self.request.query_params.get('date_to')
+        params = self.request.query_params
+        task_type = params.get('task_type')
+        task_category = params.get('task_category')
+        date_from = params.get('date_from')
+        date_to   = params.get('date_to')
+        if task_type:
+            qs = qs.filter(task_type_id=task_type)
+        if task_category:
+            qs = qs.filter(task_category_id=task_category)
+        if task_type and task_category:
+            qs = qs.filter(task_category__task_type_id=task_type)
         if date_from:
             qs = qs.filter(expected_datetime__date__gte=date_from)
         if date_to:

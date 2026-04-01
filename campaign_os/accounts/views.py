@@ -9,6 +9,7 @@ from campaign_os.core.permissions import ScreenPermission
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
+from django.db.models import Q
 from campaign_os.accounts.models import (
     User, Role, UserLog, PagePermission,
     MainScreen, UserScreen, UserScreenPermission,
@@ -49,26 +50,70 @@ class UserViewSet(viewsets.ModelViewSet):
         POST /api/v1/auth/users/change-password/ - Change password
     """
     screen_slug = 'user'
-    queryset = User.objects.filter(is_active=True)
+    queryset = User.objects.filter(is_active=True).select_related(
+        'state', 'district', 'constituency', 'booth'
+    )
     permission_classes = [IsAuthenticated, ScreenPermission]
+    filterset_fields = ['role', 'state', 'district', 'constituency', 'booth']
+    search_fields = ['username', 'first_name', 'last_name', 'phone', 'email', 'volunteer_profile__role']
+
+    def get_permissions(self):
+        """
+        Allow role-filtered user listing for task assignment without requiring
+        the full user-management screen permission.
+        """
+        if self.action == 'list' and self.request.query_params.get('role') is not None:
+            return [IsAuthenticated()]
+        return [permission() for permission in self.permission_classes]
     
     def get_serializer_class(self):
         if self.action in ['create', 'update', 'partial_update']:
             return UserCreateUpdateSerializer
         return UserDetailSerializer
+
+    @staticmethod
+    def _normalize_role(value: str) -> str:
+        return ' '.join((value or '').strip().lower().replace('_', ' ').replace('-', ' ').split())
     
     def get_queryset(self):
         """Filter users based on role and access level"""
         user = self.request.user
+        base_qs = User.objects.filter(is_active=True).select_related(
+            'state', 'district', 'constituency', 'booth'
+        )
+
         if user.is_staff or user.is_superuser:
-            return User.objects.all()
-        if user.role == 'admin':
-            return User.objects.all()
-        if user.role == 'district_head':
-            return User.objects.filter(district=user.district)
-        if user.role == 'constituency_mgr':
-            return User.objects.filter(constituency=user.constituency)
-        return User.objects.filter(id=user.id)
+            qs = base_qs
+        elif user.role == 'admin':
+            qs = base_qs
+        elif user.role == 'district_head':
+            qs = base_qs.filter(district=user.district)
+        elif user.role == 'constituency_mgr':
+            qs = base_qs.filter(constituency=user.constituency)
+        else:
+            qs = base_qs.filter(id=user.id)
+
+        # /api/v1/auth/users/?role=<role>
+        # Supports:
+        # - internal role slug: booth_agent
+        # - human label: Booth Agent
+        # - volunteer-profile role text (for task assignment role filtering)
+        role_param = self.request.query_params.get('role', '').strip()
+        if role_param:
+            role_norm = self._normalize_role(role_param)
+            role_spaces = role_param.replace('_', ' ').replace('-', ' ')
+            matching_role_codes = [
+                code for code, label in User.ROLE_CHOICES
+                if role_norm in {self._normalize_role(code), self._normalize_role(label)}
+            ]
+
+            qs = qs.filter(
+                Q(role__in=matching_role_codes) |
+                Q(volunteer_profile__role__iexact=role_param) |
+                Q(volunteer_profile__role__iexact=role_spaces)
+            ).distinct()
+
+        return qs
     
     def create(self, request, *args, **kwargs):
         """Create new user - admin only"""

@@ -379,8 +379,27 @@ class Issue(BaseModel):
         return self.name
 
 
+class TaskType(BaseModel):
+    """Task Type master — drives the task type dropdown in Task Entry"""
+    name        = models.CharField(max_length=100, unique=True)
+    description = models.TextField(blank=True, null=True)
+    order       = models.IntegerField(default=0)
+
+    class Meta:
+        ordering = ['order', 'name']
+        verbose_name_plural = 'Task Types'
+
+    def __str__(self):
+        return self.name
+
+
 class TaskCategory(BaseModel):
     """Task Category master — used by campaign tasks"""
+    task_type   = models.ForeignKey(
+        'masters.TaskType', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='categories', db_constraint=False,
+        help_text='Task type this category belongs to'
+    )
     name        = models.CharField(max_length=100, unique=True)
     description = models.TextField(blank=True, null=True)
     color       = models.CharField(max_length=7, blank=True, null=True, help_text='Hex colour e.g. #FF9933')

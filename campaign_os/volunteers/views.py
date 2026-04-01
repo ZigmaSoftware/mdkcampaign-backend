@@ -26,7 +26,11 @@ class VolunteerViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
-        search = self.request.query_params.get('search', '').strip()
+        params = self.request.query_params
+        search    = params.get('search',    '').strip()
+        block     = params.get('block',     '').strip()
+        panchayat = params.get('panchayat', '').strip()
+        union     = params.get('union',     '').strip()
         if search:
             q = (
                 Q(name__icontains=search) |
@@ -46,13 +50,27 @@ class VolunteerViewSet(viewsets.ModelViewSet):
             if search.isdigit():
                 q |= Q(age=int(search))
             qs = qs.filter(q)
+        if block:
+            qs = qs.filter(block__iexact=block)
+        if panchayat:
+            qs = qs.filter(booth__panchayat__name__iexact=panchayat)
+        if union:
+            qs = qs.filter(booth__panchayat__union__name__iexact=union)
         return qs
 
     @action(detail=False, methods=['GET'], url_path='names')
     def names(self, request):
-        """Return minimal volunteer list for agent/booth dropdown"""
+        """
+        Return minimal volunteer list for dropdowns.
+        Optional filter: ?role=<role_name> to filter by volunteer role.
+        Returns user_id so caller can populate User FK fields (delivery_incharge, coordinator).
+        """
+        qs = self.get_queryset()
+        role = request.query_params.get('role', '').strip()
+        if role:
+            qs = qs.filter(role__iexact=role)
         data = []
-        for v in self.get_queryset():
+        for v in qs:
             if v.name:
                 vol_name = v.name
                 phone    = v.phone or ''
@@ -62,7 +80,13 @@ class VolunteerViewSet(viewsets.ModelViewSet):
             else:
                 vol_name = f'Volunteer #{v.id}'
                 phone    = v.phone or ''
-            data.append({'id': v.id, 'user_name': vol_name, 'phone': phone})
+            data.append({
+                'id':      v.id,
+                'user_id': v.user_id,
+                'user_name': vol_name,
+                'phone':   phone,
+                'role':    v.role or '',
+            })
         return Response(data)
 
     def perform_create(self, serializer):
