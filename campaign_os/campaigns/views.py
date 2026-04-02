@@ -86,7 +86,9 @@ class CampaignEventViewSet(viewsets.ModelViewSet):
 class TaskViewSet(viewsets.ModelViewSet):
     screen_slug = 'event'
     queryset = Task.objects.filter(is_active=True).select_related(
-        'delivery_incharge', 'coordinator', 'task_type', 'task_category',
+        'delivery_incharge', 'delivery_incharge__user',
+        'coordinator', 'coordinator__user',
+        'task_type', 'task_category',
         'volunteer_role', 'block', 'union', 'panchayat', 'booth', 'ward'
     )
     serializer_class = TaskSerializer

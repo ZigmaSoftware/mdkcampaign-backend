@@ -77,7 +77,7 @@ class VolunteerSerializer(serializers.ModelSerializer):
             'id', 'user', 'user_name', 'username', 'name', 'voter_id', 'phone',
             'booth', 'booth_name', 'booths', 'booth_names', 'ward', 'block',
             'panchayat_name', 'union_name',
-            'status', 'volunteer_type', 'role', 'age', 'gender', 'joined_date',
+            'status', 'volunteer_type', 'role', 'volunteer_role', 'age', 'gender', 'joined_date',
             'source', 'skills', 'vehicle', 'notes', 'phone2',
             'experience_months', 'previous_campaigns',
             'voters_contacted', 'events_attended', 'hours_contributed',

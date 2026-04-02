@@ -1,16 +1,27 @@
 """
 Analytics views and serializers
 """
+import logging
 from rest_framework import serializers, viewsets, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.db.models import Count, Sum, Q, F, Case, When, IntegerField
+from django.db.models.functions import Trim, Upper
 from campaign_os.analytics.models import DashboardSnapshot
 from campaign_os.voters.models import Voter
 from campaign_os.masters.models import Booth, Constituency, District
 from campaign_os.volunteers.models import Volunteer
+from campaign_os.beneficiaries.models import Beneficiary
 from campaign_os.campaigns.models import CampaignEvent
 from rest_framework import status as drf_status
+
+logger = logging.getLogger(__name__)
+
+
+def _norm_voter_id(value):
+    if not value:
+        return ''
+    return str(value).strip().upper()
 
 
 class DashboardSnapshotSerializer(serializers.ModelSerializer):
@@ -101,14 +112,77 @@ class AnalyticsViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['GET'])
     def booth_voters_list(self, request, booth_id=None):
         """Return voters for a specific booth with basic details."""
-        voters = Voter.objects.filter(
-            is_active=True, booth_id=booth_id
-        ).order_by('village__name', 'name').values(
-            'id', 'voter_id', 'name', 'age', 'gender',
-            'sentiment', 'is_contacted', 'phone',
-            ward_name=F('village__name'),
+        logger.info(
+            "booth_voters_list called booth_id=%s params=%s user=%s",
+            booth_id,
+            dict(request.GET),
+            getattr(request.user, 'id', None),
         )
-        return Response(list(voters))
+
+        base_rows = list(
+            Voter.objects.filter(is_active=True, booth_id=booth_id)
+            .order_by('village__name', 'name')
+            .values(
+                'id', 'voter_id', 'name', 'age', 'gender',
+                'sentiment', 'is_contacted', 'phone',
+                ward_name=F('village__name'),
+            )
+        )
+        if not base_rows:
+            return Response([])
+
+        voter_ids = [row.get('voter_id') for row in base_rows if row.get('voter_id')]
+        normalized_voter_ids = {
+            _norm_voter_id(voter_id)
+            for voter_id in voter_ids
+            if _norm_voter_id(voter_id)
+        }
+        volunteer_ids = set()
+        beneficiary_ids = set()
+
+        if normalized_voter_ids:
+            volunteer_ids = set(
+                Volunteer.objects.filter(is_active=True, voter_id__isnull=False)
+                .annotate(norm_voter_id=Upper(Trim(F('voter_id'))))
+                .filter(norm_voter_id__in=normalized_voter_ids)
+                .values_list('norm_voter_id', flat=True)
+            )
+            beneficiary_ids = set(
+                Beneficiary.objects.filter(is_active=True, voter_id__isnull=False)
+                .annotate(norm_voter_id=Upper(Trim(F('voter_id'))))
+                .filter(norm_voter_id__in=normalized_voter_ids)
+                .values_list('norm_voter_id', flat=True)
+            )
+
+        voters = []
+        for row in base_rows:
+            voter_id = _norm_voter_id(row.get('voter_id'))
+            is_volunteer = bool(voter_id and voter_id in volunteer_ids)
+            is_beneficiary = bool(voter_id and voter_id in beneficiary_ids)
+
+            if is_volunteer:
+                voter_type = 'Volunteer'
+            elif is_beneficiary:
+                voter_type = 'Beneficiary'
+            else:
+                voter_type = None
+
+            voters.append({
+                'id': row.get('id'),
+                'voter_id': row.get('voter_id'),
+                'name': row.get('name'),
+                'age': row.get('age'),
+                'gender': row.get('gender'),
+                'sentiment': row.get('sentiment'),
+                'is_contacted': row.get('is_contacted'),
+                'phone': row.get('phone'),
+                'ward_name': row.get('ward_name'),
+                'voter_type': voter_type,
+                'is_volunteer_type': is_volunteer,
+                'is_beneficiary_type': is_beneficiary,
+            })
+
+        return Response(voters)
     
     @action(detail=False, methods=['GET'])
     def constituency_stats(self, request):

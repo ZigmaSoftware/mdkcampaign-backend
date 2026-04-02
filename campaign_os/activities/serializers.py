@@ -32,7 +32,7 @@ class FieldSurveySerializer(serializers.ModelSerializer):
             'is_registered', 'aware_of_candidate', 'likely_to_vote',
             'support_level', 'party_preference', 'key_issues', 'remarks',
             'response_status',
-            'surveyed_by',
+            'surveyed_by', 'assigned_volunteer',
             'created_at', 'updated_at',
         ]
 

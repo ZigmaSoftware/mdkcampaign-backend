@@ -92,6 +92,7 @@ class FieldSurvey(BaseModel):
 
     # Who surveyed
     surveyed_by         = models.CharField(max_length=150, blank=True)
+    assigned_volunteer  = models.CharField(max_length=150, blank=True)
 
     class Meta:
         ordering = ['-survey_date', '-created_at']

@@ -95,10 +95,12 @@ class TaskSerializer(serializers.ModelSerializer):
 
     def get_delivery_incharge_name(self, obj):
         if obj.delivery_incharge:
-            return obj.delivery_incharge.get_full_name() or obj.delivery_incharge.username
+            v = obj.delivery_incharge
+            return v.name or (v.user.get_full_name() if v.user_id else f'Volunteer #{v.id}')
         return None
 
     def get_coordinator_name(self, obj):
         if obj.coordinator:
-            return obj.coordinator.get_full_name() or obj.coordinator.username
+            v = obj.coordinator
+            return v.name or (v.user.get_full_name() if v.user_id else f'Volunteer #{v.id}')
         return None

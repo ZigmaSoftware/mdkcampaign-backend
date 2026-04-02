@@ -39,6 +39,10 @@ class Volunteer(BaseModel):
 
     block       = models.CharField(max_length=100, blank=True, null=True)
     role        = models.CharField(max_length=100, blank=True, null=True)
+    volunteer_role = models.ForeignKey(
+        'masters.VolunteerRole', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='volunteers', db_constraint=False,
+    )
     age         = models.IntegerField(null=True, blank=True)
     gender      = models.CharField(max_length=20, blank=True, null=True)
     joined_date = models.DateField(null=True, blank=True)

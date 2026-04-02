@@ -186,11 +186,11 @@ class Task(BaseModel):
         related_name='tasks', db_constraint=False,
     )
     delivery_incharge = models.ForeignKey(
-        'accounts.User', on_delete=models.SET_NULL, null=True, blank=True,
+        'volunteers.Volunteer', on_delete=models.SET_NULL, null=True, blank=True,
         related_name='incharge_tasks', db_constraint=False,
     )
     coordinator = models.ForeignKey(
-        'accounts.User', on_delete=models.SET_NULL, null=True, blank=True,
+        'volunteers.Volunteer', on_delete=models.SET_NULL, null=True, blank=True,
         related_name='coordinating_tasks', db_constraint=False,
     )
 

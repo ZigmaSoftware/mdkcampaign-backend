@@ -18,11 +18,17 @@ class VolunteerViewSet(viewsets.ModelViewSet):
     """Volunteer management"""
     screen_slug = 'volunteer'
     queryset = Volunteer.objects.filter(is_active=True).select_related(
-        'user', 'booth__panchayat__union__block'
+        'user', 'booth__panchayat__union__block', 'volunteer_role'
     ).prefetch_related('booths__panchayat__union')
     serializer_class = VolunteerSerializer
     permission_classes = [permissions.IsAuthenticated, ScreenPermission]
     filterset_fields = ['booth', 'status', 'ward']
+
+    def get_permissions(self):
+        # Allow the 'names' action for any authenticated user (used by task form)
+        if self.action == 'names':
+            return [permissions.IsAuthenticated()]
+        return super().get_permissions()
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -62,13 +68,34 @@ class VolunteerViewSet(viewsets.ModelViewSet):
     def names(self, request):
         """
         Return minimal volunteer list for dropdowns.
-        Optional filter: ?role=<role_name> to filter by volunteer role.
-        Returns user_id so caller can populate User FK fields (delivery_incharge, coordinator).
+        Filters:
+          ?role=<role_name>      — match Volunteer.role (legacy CharField)
+          ?role_id=<id>          — match Volunteer.volunteer_role FK id
+          ?volunteer_role=<name> — match VolunteerRole.name (iexact)
         """
         qs = self.get_queryset()
         role = request.query_params.get('role', '').strip()
-        if role:
-            qs = qs.filter(role__iexact=role)
+        role_id = request.query_params.get('role_id', '').strip()
+        vol_role = request.query_params.get('volunteer_role', '').strip()
+        if role_id:
+            filtered = qs.filter(volunteer_role_id=role_id)
+            if filtered.exists():
+                qs = filtered
+            # else: fallback to all volunteers (role not yet tagged)
+        elif vol_role:
+            filtered = qs.filter(
+                Q(volunteer_role__name__iexact=vol_role) |
+                Q(role__iexact=vol_role)
+            )
+            if filtered.exists():
+                qs = filtered
+        elif role:
+            filtered = qs.filter(
+                Q(role__iexact=role) |
+                Q(volunteer_role__name__iexact=role)
+            )
+            if filtered.exists():
+                qs = filtered
         data = []
         for v in qs:
             if v.name:

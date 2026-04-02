@@ -50,6 +50,10 @@ class TelecallingFeedback(BaseModel):
         ('followup_required',     'Followup Required'),
         ('followup_not_required', 'Followup Not Required'),
     ]
+    FOLLOWUP_TYPE_CHOICES = [
+        ('telephonic',   'Telephonic'),
+        ('field_survey', 'Field Survey'),
+    ]
 
     survey          = models.ForeignKey(
         'activities.FieldSurvey', on_delete=models.SET_NULL,
@@ -59,6 +63,7 @@ class TelecallingFeedback(BaseModel):
     voter_name      = models.CharField(max_length=200)
     telecaller_name = models.CharField(max_length=200, blank=True)
     action          = models.CharField(max_length=30, choices=ACTION_CHOICES)
+    followup_type   = models.CharField(max_length=30, choices=FOLLOWUP_TYPE_CHOICES, blank=True)
     date            = models.DateField()
 
     class Meta:
