@@ -491,13 +491,17 @@ class Achievement(BaseModel):
     """Campaign Achievement"""
     name        = models.CharField(max_length=200, null=True, blank=True)
     description = models.TextField(blank=True, null=True)
-    ward = models.ForeignKey(
-        'masters.Ward', on_delete=models.SET_NULL, null=True, blank=True,
+    panchayat = models.ForeignKey(
+        'masters.Panchayat', on_delete=models.SET_NULL, null=True, blank=True,
         related_name='achievements', db_constraint=False
     )
     booth = models.ForeignKey(
         'masters.Booth', on_delete=models.SET_NULL, null=True, blank=True,
         related_name='achievements', db_constraint=False
+    )
+    feed_amount = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True,
+        help_text='Amount spent on feeding/refreshments',
     )
 
     class Meta:

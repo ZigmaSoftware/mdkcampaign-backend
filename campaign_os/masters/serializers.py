@@ -313,14 +313,15 @@ class TaskCategorySerializer(serializers.ModelSerializer):
 
 class AchievementSerializer(serializers.ModelSerializer):
     """Campaign Achievement"""
-    ward_name  = serializers.CharField(source='ward.name',  read_only=True)
-    booth_name = serializers.CharField(source='booth.name', read_only=True)
+    panchayat_name = serializers.CharField(source='panchayat.name', read_only=True, default='')
+    booth_name     = serializers.CharField(source='booth.name',     read_only=True, default='')
 
     class Meta:
         model = Achievement
         fields = [
             'id', 'name', 'description',
-            'ward', 'ward_name', 'booth', 'booth_name',
+            'panchayat', 'panchayat_name', 'booth', 'booth_name',
+            'feed_amount',
             'created_at', 'updated_at'
         ]
 

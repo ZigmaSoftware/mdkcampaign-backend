@@ -18,12 +18,33 @@ def build_voter_status_map(voter_ids: Iterable[int]) -> Dict[int, dict]:
     """
     Compute current workflow state for each voter based on latest feedback and
     assignment timestamps.
+
+    Handles two lookup paths:
+      1. survey.voter_id FK (preferred, exact match)
+      2. voter_name fallback for surveys where voter_id was not set
     """
     voter_id_set = {int(v) for v in voter_ids if v}
     if not voter_id_set:
         return {}
 
-    latest_feedback = {}
+    # ── Collect voter_name → voter_id mapping from assignments ──
+    name_to_voter_id: Dict[str, int] = {}
+    assignment_qs = (
+        TelecallingAssignmentVoter.objects
+        .filter(voter_id__in=voter_id_set)
+        .select_related('assignment')
+        .order_by('voter_id', '-assignment__created_at', '-assignment_id')
+    )
+    latest_assignment: Dict[int, object] = {}
+    for row in assignment_qs:
+        if row.voter_id not in latest_assignment:
+            latest_assignment[row.voter_id] = row.assignment.created_at
+        # Build name → id mapping (lowercase for case-insensitive match)
+        if row.voter_name:
+            name_to_voter_id[row.voter_name.strip().lower()] = row.voter_id
+
+    # ── Find latest feedback per voter (by voter_id FK) ──
+    latest_feedback: Dict[int, object] = {}
     feedback_qs = (
         TelecallingFeedback.objects
         .filter(is_active=True, survey__voter_id__in=voter_id_set)
@@ -36,17 +57,26 @@ def build_voter_status_map(voter_ids: Iterable[int]) -> Dict[int, dict]:
         if voter_id and voter_id not in latest_feedback:
             latest_feedback[voter_id] = feedback
 
-    latest_assignment = {}
-    assignment_qs = (
-        TelecallingAssignmentVoter.objects
-        .filter(voter_id__in=voter_id_set)
-        .select_related('assignment')
-        .order_by('voter_id', '-assignment__created_at', '-assignment_id')
-    )
-    for row in assignment_qs:
-        if row.voter_id not in latest_assignment:
-            latest_assignment[row.voter_id] = row.assignment.created_at
+    # ── Fallback: find feedbacks where survey.voter_id is null, match by name ──
+    missing_ids = voter_id_set - set(latest_feedback.keys())
+    if missing_ids and name_to_voter_id:
+        # Get all feedbacks where survey has no voter_id
+        name_fb_qs = (
+            TelecallingFeedback.objects
+            .filter(is_active=True, survey__voter_id__isnull=True)
+            .select_related('survey')
+            .order_by('-date', '-created_at', '-id')
+        )
+        for feedback in name_fb_qs:
+            survey = feedback.survey
+            if not survey or not survey.voter_name:
+                continue
+            name_key = survey.voter_name.strip().lower()
+            voter_id = name_to_voter_id.get(name_key)
+            if voter_id and voter_id in missing_ids and voter_id not in latest_feedback:
+                latest_feedback[voter_id] = feedback
 
+    # ── Build status map ──
     status_map: Dict[int, dict] = {}
     for voter_id in voter_id_set:
         feedback = latest_feedback.get(voter_id)
@@ -60,6 +90,7 @@ def build_voter_status_map(voter_ids: Iterable[int]) -> Dict[int, dict]:
             status = 'pending_field_survey'
             is_locked = True
         else:
+            # followup_required + telephonic (or empty type)
             latest_assignment_ts = latest_assignment.get(voter_id)
             feedback_ts = feedback.created_at
             if latest_assignment_ts and feedback_ts and latest_assignment_ts > feedback_ts:

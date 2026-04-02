@@ -417,10 +417,10 @@ class SchemeViewSet(viewsets.ModelViewSet):
 
 class AchievementViewSet(viewsets.ModelViewSet):
     screen_slug = "achievement"
-    queryset = Achievement.objects.filter(is_active=True).select_related('ward', 'booth')
+    queryset = Achievement.objects.filter(is_active=True).select_related('panchayat', 'booth')
     serializer_class = AchievementSerializer
     permission_classes = [permissions.IsAuthenticated, ScreenPermission]
-    filterset_fields = ['ward', 'booth']
+    filterset_fields = ['panchayat', 'booth']
     search_fields = ['name', 'description']
     ordering = ['-created_at']
 
