@@ -84,6 +84,20 @@ class VoterViewSet(viewsets.ModelViewSet):
             if age_q:
                 qs = qs.filter(age_q)
 
+        # Contact number filter: ?contact_status=with|without
+        contact_status = self.request.query_params.get('contact_status', '').strip().lower()
+        if contact_status:
+            has_contact_q = (
+                (Q(phone__isnull=False) & ~Q(phone='')) |
+                (Q(phone2__isnull=False) & ~Q(phone2='')) |
+                (Q(alt_phoneno2__isnull=False) & ~Q(alt_phoneno2='')) |
+                (Q(alt_phoneno3__isnull=False) & ~Q(alt_phoneno3=''))
+            )
+            if contact_status in {'with', 'yes', 'true', '1'}:
+                qs = qs.filter(has_contact_q)
+            elif contact_status in {'without', 'no', 'false', '0'}:
+                qs = qs.exclude(has_contact_q)
+
         return qs
 
     @action(detail=False, methods=['GET'])

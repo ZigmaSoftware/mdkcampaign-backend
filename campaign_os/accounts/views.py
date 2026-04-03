@@ -9,7 +9,7 @@ from campaign_os.core.permissions import ScreenPermission
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
-from django.db.models import Q
+from django.db.models import Count, Q
 from campaign_os.accounts.models import (
     User, Role, UserLog, PagePermission,
     MainScreen, UserScreen, UserScreenPermission,
@@ -20,6 +20,90 @@ from campaign_os.accounts.serializers import (
     RoleSerializer, UserLogSerializer, PagePermissionSerializer,
     MainScreenSerializer, UserScreenSerializer, UserScreenPermissionSerializer,
 )
+
+
+PERMISSION_MENU_LAYOUT = {
+    'entry': [
+        {
+            'slug': 'field-data',
+            'name': 'Field Data',
+            'icon': 'ph ph-database',
+            'screens': ['voter', 'booth', 'family-mapping'],
+        },
+        {
+            'slug': 'people',
+            'name': 'People',
+            'icon': 'ph ph-users-three',
+            'screens': ['volunteer', 'beneficiary', 'user'],
+        },
+        {
+            'slug': 'campaign',
+            'name': 'Campaign',
+            'icon': 'ph ph-megaphone',
+            'screens': ['event', 'campaign'],
+        },
+        {
+            'slug': 'activity',
+            'name': 'Activity Logs',
+            'icon': 'ph ph-clipboard-text',
+            'screens': [
+                'voter-survey',
+                'field-activity',
+                'attendance',
+                'assign-telecalling',
+                'telecalling-assigned',
+                'feedback-review',
+            ],
+        },
+    ],
+    'masters-config': [
+        {
+            'slug': 'geography',
+            'name': 'Geography',
+            'icon': 'ph ph-globe-hemisphere-east',
+            'screens': ['district', 'constituency', 'ward', 'area', 'booth-master', 'panchayat', 'union'],
+        },
+        {
+            'slug': 'campaign-setup',
+            'name': 'Campaign Setup',
+            'icon': 'ph ph-megaphone',
+            'screens': ['scheme', 'achievement', 'candidate', 'party', 'task-category', 'campaign-activity'],
+        },
+        {
+            'slug': 'volunteer-setup',
+            'name': 'Volunteer Setup',
+            'icon': 'ph ph-identification-badge',
+            'screens': ['volunteer-role', 'volunteer-type'],
+        },
+        {
+            'slug': 'admin-security',
+            'name': 'Admin & Security',
+            'icon': 'ph ph-shield-check',
+            'screens': ['user-mgmt', 'permissions'],
+        },
+    ],
+    'report': [
+        {
+            'slug': 'reports',
+            'name': 'Reports',
+            'icon': 'ph ph-chart-bar',
+            'screens': ['report-overview', 'voter-report', 'volunteer-report', 'campaign-report', 'activity-report'],
+        },
+    ],
+    'opinion-poll': [
+        {
+            'slug': 'poll-management',
+            'name': 'Poll Management',
+            'icon': 'ph ph-megaphone',
+            'screens': ['poll-questions', 'poll-results', 'poll-analysis'],
+        },
+    ],
+}
+
+
+def _permission_label(value: str) -> str:
+    parts = [part for part in (value or '').replace('_', ' ').split() if part]
+    return ' '.join(part.capitalize() for part in parts)
 
 
 class LoginView(TokenObtainPairView):
@@ -51,11 +135,11 @@ class UserViewSet(viewsets.ModelViewSet):
     """
     screen_slug = 'user'
     queryset = User.objects.filter(is_active=True).select_related(
-        'state', 'district', 'constituency', 'booth'
+        'state', 'district', 'constituency', 'booth', 'volunteer_profile__volunteer_role'
     )
     permission_classes = [IsAuthenticated, ScreenPermission]
     filterset_fields = ['role', 'state', 'district', 'constituency', 'booth']
-    search_fields = ['username', 'first_name', 'last_name', 'phone', 'email', 'volunteer_profile__role']
+    search_fields = ['username', 'first_name', 'last_name', 'phone', 'email', 'volunteer_profile__role', 'volunteer_profile__volunteer_role__name']
 
     def get_permissions(self):
         """
@@ -79,7 +163,7 @@ class UserViewSet(viewsets.ModelViewSet):
         """Filter users based on role and access level"""
         user = self.request.user
         base_qs = User.objects.filter(is_active=True).select_related(
-            'state', 'district', 'constituency', 'booth'
+            'state', 'district', 'constituency', 'booth', 'volunteer_profile__volunteer_role'
         )
 
         if user.is_staff or user.is_superuser:
@@ -110,7 +194,9 @@ class UserViewSet(viewsets.ModelViewSet):
             qs = qs.filter(
                 Q(role__in=matching_role_codes) |
                 Q(volunteer_profile__role__iexact=role_param) |
-                Q(volunteer_profile__role__iexact=role_spaces)
+                Q(volunteer_profile__role__iexact=role_spaces) |
+                Q(volunteer_profile__volunteer_role__name__iexact=role_param) |
+                Q(volunteer_profile__volunteer_role__name__iexact=role_spaces)
             ).distinct()
 
         return qs
@@ -122,7 +208,24 @@ class UserViewSet(viewsets.ModelViewSet):
                 {'detail': 'Only admins can create users'},
                 status=status.HTTP_403_FORBIDDEN
             )
-        return super().create(request, *args, **kwargs)
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        detail = UserDetailSerializer(serializer.instance).data
+        return Response(detail, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        detail = UserDetailSerializer(serializer.instance).data
+        return Response(detail)
+
+    def partial_update(self, request, *args, **kwargs):
+        kwargs['partial'] = True
+        return self.update(request, *args, **kwargs)
     
     @action(detail=False, methods=['GET'], permission_classes=[IsAuthenticated])
     def me(self, request):
@@ -247,8 +350,8 @@ class PagePermissionViewSet(viewsets.ModelViewSet):
         """
         Return the current user's page access list AND screen-level CRUD permissions.
 
-        For volunteers the lookup key is their volunteer_type slug
-        (e.g. "party_worker") when one exists; otherwise falls back to "volunteer".
+        For volunteers the lookup key prefers their VolunteerRole master name,
+        then volunteer_type slug, then falls back to the generic "volunteer".
 
         Response shape:
         {
@@ -265,15 +368,25 @@ class PagePermissionViewSet(viewsets.ModelViewSet):
         """
         role = request.user.role
 
-        # For volunteer users, try to resolve their specific volunteer-type slug
+        # For volunteer users, prefer the master VolunteerRole name.
         if role == 'volunteer':
             try:
                 from campaign_os.volunteers.models import Volunteer
-                vol = Volunteer.objects.filter(user=request.user).first()
+                vol = Volunteer.objects.filter(user=request.user).select_related('volunteer_role').first()
+                role_candidates = []
+
+                if vol and vol.volunteer_role and vol.volunteer_role.name:
+                    role_candidates.append(vol.volunteer_role.name.strip())
+
                 if vol and vol.volunteer_type:
-                    vol_type_slug = vol.volunteer_type.strip().lower().replace(' ', '_')
-                    if UserScreenPermission.objects.filter(role=vol_type_slug).exists():
-                        role = vol_type_slug
+                    role_candidates.append(vol.volunteer_type.strip().lower().replace(' ', '_'))
+
+                role_candidates.append('volunteer')
+
+                for candidate in role_candidates:
+                    if candidate and UserScreenPermission.objects.filter(role=candidate).exists():
+                        role = candidate
+                        break
             except Exception:
                 pass  # Fall back to generic 'volunteer'
 
@@ -356,6 +469,50 @@ class UserScreenPermissionViewSet(viewsets.ModelViewSet):
             qs = qs.filter(user_screen__main_screen__slug=ms_slug)
         return qs
 
+    def _build_matrix_rows(self, role, main_screen_slug=None):
+        existing = {
+            perm.user_screen_id: perm
+            for perm in (
+                UserScreenPermission.objects
+                .filter(role=role)
+                .select_related('user_screen__main_screen')
+            )
+        }
+
+        screens = (
+            UserScreen.objects
+            .filter(is_active=True)
+            .select_related('main_screen')
+            .order_by('main_screen__order', 'order')
+        )
+        if main_screen_slug:
+            screens = screens.filter(main_screen__slug=main_screen_slug)
+
+        rows = []
+        for screen in screens:
+            perm = existing.get(screen.id)
+            rows.append({
+                'id': perm.id if perm else None,
+                'role': role,
+                'user_screen': screen.id,
+                'user_screen_slug': screen.slug,
+                'user_screen_name': screen.name,
+                'main_screen_slug': screen.main_screen.slug,
+                'main_screen_name': screen.main_screen.name,
+                'can_view': perm.can_view if perm else False,
+                'can_add': perm.can_add if perm else False,
+                'can_edit': perm.can_edit if perm else False,
+                'can_delete': perm.can_delete if perm else False,
+                'allowed_actions': perm.allowed_actions if perm else [],
+            })
+        return rows
+
+    def list(self, request, *args, **kwargs):
+        role = request.query_params.get('role', '').strip()
+        if role:
+            return Response(self._build_matrix_rows(role, request.query_params.get('main_screen')))
+        return super().list(request, *args, **kwargs)
+
     def _admin_only(self, request):
         if request.user.role != 'admin':
             from rest_framework.response import Response as R
@@ -379,6 +536,153 @@ class UserScreenPermissionViewSet(viewsets.ModelViewSet):
         from campaign_os.accounts.management.commands.seed_screens import seed_screen_permissions
         seed_screen_permissions()
         return Response({'detail': 'Screen permissions seeded'})
+
+    @action(detail=False, methods=['POST'], url_path='bulk-upsert')
+    def bulk_upsert(self, request):
+        """Create or update permission rows for a role in one request."""
+        if request.user.role != 'admin':
+            return Response({'detail': 'Admin only'}, status=status.HTTP_403_FORBIDDEN)
+
+        role = (request.data.get('role') or '').strip()
+        items = request.data.get('permissions') or []
+        if not role:
+            return Response({'detail': 'Role is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if not isinstance(items, list) or not items:
+            return Response({'detail': 'permissions must be a non-empty list'}, status=status.HTTP_400_BAD_REQUEST)
+
+        created = 0
+        updated = 0
+
+        for item in items:
+            screen = None
+            screen_id = item.get('user_screen')
+            screen_slug = (item.get('user_screen_slug') or '').strip()
+
+            if screen_id:
+                screen = UserScreen.objects.filter(id=screen_id, is_active=True).first()
+            if not screen and screen_slug:
+                screen = UserScreen.objects.filter(slug=screen_slug, is_active=True).first()
+            if not screen:
+                return Response(
+                    {'detail': f'Unknown user screen: {screen_id or screen_slug}'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            perm, was_created = UserScreenPermission.objects.update_or_create(
+                role=role,
+                user_screen=screen,
+                defaults={
+                    'can_view': bool(item.get('can_view')),
+                    'can_add': bool(item.get('can_add')),
+                    'can_edit': bool(item.get('can_edit')),
+                    'can_delete': bool(item.get('can_delete')),
+                },
+            )
+            if was_created:
+                created += 1
+            else:
+                updated += 1
+
+        return Response({
+            'detail': 'Permissions saved',
+            'created': created,
+            'updated': updated,
+        })
+
+    @action(detail=False, methods=['GET'], url_path='catalog')
+    def catalog(self, request):
+        """
+        Metadata for the user-permission builder UI.
+        """
+        from campaign_os.masters.models import VolunteerRole
+
+        volunteer_roles = (
+            VolunteerRole.objects
+            .filter(is_active=True)
+            .annotate(user_count=Count('volunteers', filter=Q(volunteers__is_active=True), distinct=True))
+            .order_by('order', 'name')
+        )
+        roles = [
+            {
+                'value': volunteer_role.name,
+                'label': volunteer_role.name,
+                'user_count': volunteer_role.user_count,
+            }
+            for volunteer_role in volunteer_roles
+        ]
+
+        permission_roles = set(
+            UserScreenPermission.objects
+            .values_list('role', flat=True)
+            .distinct()
+        )
+
+        main_screens = (
+            MainScreen.objects
+            .filter(is_active=True)
+            .prefetch_related('screens')
+            .order_by('order')
+        )
+
+        menus = []
+        for menu in main_screens:
+            active_screens = sorted(
+                [screen for screen in menu.screens.all() if screen.is_active],
+                key=lambda screen: screen.order,
+            )
+            screen_map = {screen.slug: screen for screen in active_screens}
+            submenus = []
+            consumed = set()
+
+            for group in PERMISSION_MENU_LAYOUT.get(menu.slug, []):
+                items = []
+                for slug in group['screens']:
+                    screen = screen_map.get(slug)
+                    if not screen:
+                        continue
+                    consumed.add(screen.slug)
+                    items.append({
+                        'id': screen.id,
+                        'slug': screen.slug,
+                        'name': screen.name,
+                        'icon': screen.icon,
+                    })
+
+                if not items:
+                    continue
+
+                submenus.append({
+                    'slug': group['slug'],
+                    'name': group['name'],
+                    'icon': group['icon'],
+                    'screen_slugs': [item['slug'] for item in items],
+                    'items': items,
+                })
+
+            for screen in active_screens:
+                if screen.slug in consumed:
+                    continue
+                submenus.append({
+                    'slug': screen.slug,
+                    'name': screen.name,
+                    'icon': screen.icon,
+                    'screen_slugs': [screen.slug],
+                    'items': [],
+                })
+
+            menus.append({
+                'id': menu.id,
+                'slug': menu.slug,
+                'name': menu.name,
+                'icon': menu.icon,
+                'submenus': submenus,
+            })
+
+        return Response({
+            'roles': roles,
+            'permission_roles': sorted(permission_roles),
+            'menus': menus,
+        })
 
     @action(detail=False, methods=['GET'], url_path='by_role')
     def by_role(self, request):

@@ -13,6 +13,7 @@ from campaign_os.masters.models import Booth, Constituency, District
 from campaign_os.volunteers.models import Volunteer
 from campaign_os.beneficiaries.models import Beneficiary
 from campaign_os.campaigns.models import CampaignEvent
+from campaign_os.activities.models import FieldSurvey
 from rest_framework import status as drf_status
 
 logger = logging.getLogger(__name__)
@@ -61,12 +62,16 @@ class AnalyticsViewSet(viewsets.ViewSet):
             'active_volunteers': Volunteer.objects.filter(is_active=True, status='active').count(),
             'total_events': CampaignEvent.objects.filter(is_active=True).count(),
             'completed_events': CampaignEvent.objects.filter(is_active=True, status='completed').count(),
+            'surveys_conducted': FieldSurvey.objects.filter(is_active=True).count(),
+            'surveys_positive':  FieldSurvey.objects.filter(is_active=True, support_level='positive').count(),
+            'surveys_negative':  FieldSurvey.objects.filter(is_active=True, support_level='negative').count(),
+            'surveys_neutral':   FieldSurvey.objects.filter(is_active=True, support_level='neutral').count(),
         }
         return Response(stats)
     
     @action(detail=False, methods=['GET'])
     def booth_statistics(self, request):
-        """Get booth-wise statistics using actual voter record counts"""
+        """Get booth-wise statistics using actual voter record counts."""
         constituency_id = request.query_params.get('constituency_id')
 
         booths = Booth.objects.filter(is_active=True).select_related(
@@ -87,13 +92,16 @@ class AnalyticsViewSet(viewsets.ViewSet):
 
         stats = []
         for b in booths:
-            total     = b.actual_total
+            # Use actual FK-linked count; fall back to the stored total_voters when
+            # voters haven't been linked to this booth via FK yet (data import gap).
+            total     = b.actual_total or b.total_voters or 0
             contacted = b.actual_contacted
             pos, neu, neg = b.cnt_positive, b.cnt_neutral, b.cnt_negative
-            sentiment_base = pos + neu + neg          # voters with a known sentiment
+            sentiment_base = pos + neu + neg
             panchayat = b.panchayat
             union  = panchayat.union  if panchayat else None
             block  = union.block      if union     else None
+
             stats.append({
                 'id': b.id,
                 'name': b.name,
@@ -103,10 +111,10 @@ class AnalyticsViewSet(viewsets.ViewSet):
                 'panchayat_name': panchayat.name if panchayat else '',
                 'union_name':     union.name     if union     else '',
                 'block_name':     block.name     if block     else '',
-                'total_voters': total,
-                'voters_contacted': contacted,
+                'total_voters':       total,
+                'voters_contacted':   contacted,
                 'coverage_percentage': round(contacted * 100 / total, 1) if total > 0 else 0,
-                'volunteer_count': b.vol_count,
+                'volunteer_count':    b.vol_count,
                 'positive_pct': round(pos * 100 / sentiment_base, 1) if sentiment_base > 0 else 0,
                 'neutral_pct':  round(neu * 100 / sentiment_base, 1) if sentiment_base > 0 else 0,
                 'negative_pct': round(neg * 100 / sentiment_base, 1) if sentiment_base > 0 else 0,
