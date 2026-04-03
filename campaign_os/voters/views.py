@@ -5,11 +5,11 @@ from rest_framework import viewsets, status, permissions, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser
-from django.db.models import Q, Count
+from django.db.models import Q, Count, F
 from campaign_os.voters.models import Voter, VoterContact, VoterSurvey, VoterPreference, VoterFeedback
 from campaign_os.core.permissions import ScreenPermission
 from campaign_os.voters.serializers import (
-    VoterSerializer, VoterSimpleSerializer, VoterContactSerializer,
+    VoterSerializer, VoterSimpleSerializer, VoterFamilyMappingSerializer, VoterContactSerializer,
     VoterSurveySerializer, VoterPreferenceSerializer, VoterFeedbackSerializer
 )
 from campaign_os.core.utils.bulk_upload import parse_upload, BulkResult, resolve_by_code, to_int, to_str, to_bool
@@ -18,13 +18,29 @@ from campaign_os.core.utils.bulk_upload import parse_upload, BulkResult, resolve
 class VoterViewSet(viewsets.ModelViewSet):
     """Voter management"""
     screen_slug = 'voter'
-    queryset = Voter.objects.filter(is_active=True).prefetch_related('booth', 'village', 'preferred_party')
+    queryset = Voter.objects.filter(is_active=True)
     permission_classes = [permissions.IsAuthenticated, ScreenPermission]
     filterset_fields = ['village', 'sentiment', 'is_contacted', 'gender', 'pincode']
     serializer_class = VoterSerializer
 
+    def get_serializer_class(self):
+        scope = self.request.query_params.get('scope', '').strip().lower()
+        if scope == 'family_mapping':
+            return VoterFamilyMappingSerializer
+        return super().get_serializer_class()
+
     def get_queryset(self):
         qs = super().get_queryset()
+        scope = self.request.query_params.get('scope', '').strip().lower()
+
+        if scope == 'family_mapping':
+            qs = qs.select_related('booth').only(
+                'id', 'name', 'voter_id', 'father_name', 'phone', 'phone2',
+                'alt_phoneno2', 'alt_phoneno3', 'address', 'booth_id', 'age',
+                'gender', 'booth__name',
+            )
+        else:
+            qs = qs.select_related('booth', 'village', 'preferred_party')
 
         # Support comma-separated booth IDs: ?booth=1,2,3
         booth_param = self.request.query_params.get('booth', '')
@@ -84,6 +100,27 @@ class VoterViewSet(viewsets.ModelViewSet):
             if age_q:
                 qs = qs.filter(age_q)
 
+        age_from_param = self.request.query_params.get('age_from', '').strip()
+        if age_from_param:
+            try:
+                qs = qs.filter(age__gte=int(age_from_param))
+            except (TypeError, ValueError):
+                pass
+
+        age_to_param = self.request.query_params.get('age_to', '').strip()
+        if age_to_param:
+            try:
+                qs = qs.filter(age__lte=int(age_to_param))
+            except (TypeError, ValueError):
+                pass
+
+        sort_param = self.request.query_params.get('sort', '').strip().lower()
+        sort_by_age = self.request.query_params.get('sort_by_age', '').strip().lower()
+        if sort_param == 'age_asc' or sort_by_age == 'asc':
+            qs = qs.order_by(F('age').asc(nulls_last=True), 'id')
+        elif sort_param == 'age_desc' or sort_by_age == 'desc':
+            qs = qs.order_by(F('age').desc(nulls_last=True), '-id')
+
         # Contact number filter: ?contact_status=with|without
         contact_status = self.request.query_params.get('contact_status', '').strip().lower()
         if contact_status:
@@ -97,6 +134,10 @@ class VoterViewSet(viewsets.ModelViewSet):
                 qs = qs.filter(has_contact_q)
             elif contact_status in {'without', 'no', 'false', '0'}:
                 qs = qs.exclude(has_contact_q)
+
+        sort_param = self.request.query_params.get('sort', '').strip().lower()
+        if sort_param == 'age_asc':
+            qs = qs.order_by(F('age').asc(nulls_last=True), 'id')
 
         return qs
 

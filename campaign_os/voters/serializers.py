@@ -12,6 +12,19 @@ class VoterSimpleSerializer(serializers.ModelSerializer):
         fields = ['id', 'name', 'voter_id', 'phone', 'booth', 'sentiment']
 
 
+class VoterFamilyMappingSerializer(serializers.ModelSerializer):
+    """Lean voter payload used by the family-mapping screen."""
+    booth_name = serializers.CharField(source='booth.name', read_only=True, default='')
+
+    class Meta:
+        model = Voter
+        fields = [
+            'id', 'name', 'voter_id', 'father_name', 'phone', 'phone2',
+            'alt_phoneno2', 'alt_phoneno3', 'address', 'booth', 'booth_name',
+            'age', 'gender',
+        ]
+
+
 class VoterSerializer(serializers.ModelSerializer):
     """Full voter details"""
     booth_name      = serializers.CharField(source='booth.name',      read_only=True, default='')

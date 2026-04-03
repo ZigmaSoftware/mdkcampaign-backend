@@ -6,6 +6,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser
 from django.db.models import Q
+from django.db.models.functions import Trim
 from campaign_os.volunteers.models import Volunteer, VolunteerTask, VolunteerAttendance
 from campaign_os.volunteers.serializers import (
     VolunteerSerializer, VolunteerTaskSerializer, VolunteerAttendanceSerializer
@@ -70,6 +71,39 @@ class VolunteerViewSet(viewsets.ModelViewSet):
             age_q = build_age_filter(age_group_param)
             if age_q:
                 qs = qs.filter(age_q)
+
+        # Voter ID filter: ?voter_id_status=with|without
+        voter_id_status = params.get('voter_id_status', '').strip().lower()
+        if voter_id_status:
+            qs = qs.annotate(trimmed_voter_id=Trim('voter_id'))
+            has_voter_id_q = Q(trimmed_voter_id__isnull=False) & ~Q(trimmed_voter_id='')
+            if voter_id_status in {'with', 'yes', 'true', '1'}:
+                qs = qs.filter(has_voter_id_q)
+            elif voter_id_status in {'without', 'no', 'false', '0'}:
+                qs = qs.exclude(has_voter_id_q)
+
+        role = params.get('role', '').strip()
+        if role and self.action != 'names':
+            qs = qs.filter(
+                Q(role__iexact=role) |
+                Q(volunteer_role__name__iexact=role)
+            )
+
+        status_param = params.get('status', '').strip().lower()
+        if status_param:
+            qs = qs.filter(status=status_param)
+
+        volunteer_type = params.get('volunteer_type', '').strip()
+        if volunteer_type:
+            qs = qs.filter(volunteer_type__iexact=volunteer_type)
+
+        gender = params.get('gender', '').strip()
+        if gender:
+            qs = qs.filter(gender__iexact=gender)
+
+        source = params.get('source', '').strip()
+        if source:
+            qs = qs.filter(source__iexact=source)
 
         return qs
 
