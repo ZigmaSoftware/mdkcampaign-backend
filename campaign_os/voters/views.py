@@ -5,7 +5,8 @@ from rest_framework import viewsets, status, permissions, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser
-from django.db.models import Q, Count, F
+from django.db.models import Q, Count, F, Value, IntegerField, Case, When, TextField
+from django.db.models.functions import Coalesce, Trim, Lower
 from campaign_os.voters.models import Voter, VoterContact, VoterSurvey, VoterPreference, VoterFeedback
 from campaign_os.core.permissions import ScreenPermission
 from campaign_os.voters.serializers import (
@@ -120,6 +121,22 @@ class VoterViewSet(viewsets.ModelViewSet):
             qs = qs.order_by(F('age').asc(nulls_last=True), 'id')
         elif sort_param == 'age_desc' or sort_by_age == 'desc':
             qs = qs.order_by(F('age').desc(nulls_last=True), '-id')
+        elif sort_param in {'address_asc', 'address_desc'}:
+            qs = qs.annotate(
+                trimmed_address=Trim(
+                    Coalesce('address', Value(''), output_field=TextField())
+                ),
+            ).annotate(
+                address_is_blank=Case(
+                    When(trimmed_address='', then=Value(1)),
+                    default=Value(0),
+                    output_field=IntegerField(),
+                ),
+            )
+            if sort_param == 'address_asc':
+                qs = qs.order_by('address_is_blank', Lower('trimmed_address').asc(), 'id')
+            else:
+                qs = qs.order_by('address_is_blank', Lower('trimmed_address').desc(), '-id')
 
         # Contact number filter: ?contact_status=with|without
         contact_status = self.request.query_params.get('contact_status', '').strip().lower()
@@ -134,10 +151,6 @@ class VoterViewSet(viewsets.ModelViewSet):
                 qs = qs.filter(has_contact_q)
             elif contact_status in {'without', 'no', 'false', '0'}:
                 qs = qs.exclude(has_contact_q)
-
-        sort_param = self.request.query_params.get('sort', '').strip().lower()
-        if sort_param == 'age_asc':
-            qs = qs.order_by(F('age').asc(nulls_last=True), 'id')
 
         return qs
 

@@ -31,6 +31,27 @@ class VolunteerViewSet(viewsets.ModelViewSet):
             return [permissions.IsAuthenticated()]
         return super().get_permissions()
 
+    def _filter_by_role(self, qs, role):
+        role = (role or '').strip()
+        if not role:
+            return qs
+
+        normalized_role = ''.join(ch for ch in role.lower() if ch.isalnum())
+        if normalized_role in {'telecalling', 'telecaller'}:
+            return qs.filter(
+                Q(role__icontains='telecall') |
+                Q(role__icontains='tele call') |
+                Q(volunteer_role__name__icontains='telecall') |
+                Q(volunteer_role__name__icontains='tele call') |
+                Q(volunteer_type__icontains='telecall') |
+                Q(volunteer_type__icontains='tele call')
+            )
+
+        return qs.filter(
+            Q(role__iexact=role) |
+            Q(volunteer_role__name__iexact=role)
+        )
+
     def get_queryset(self):
         qs = super().get_queryset()
         params = self.request.query_params
@@ -84,10 +105,7 @@ class VolunteerViewSet(viewsets.ModelViewSet):
 
         role = params.get('role', '').strip()
         if role and self.action != 'names':
-            qs = qs.filter(
-                Q(role__iexact=role) |
-                Q(volunteer_role__name__iexact=role)
-            )
+            qs = self._filter_by_role(qs, role)
 
         status_param = params.get('status', '').strip().lower()
         if status_param:
@@ -126,17 +144,11 @@ class VolunteerViewSet(viewsets.ModelViewSet):
                 qs = filtered
             # else: fallback to all volunteers (role not yet tagged)
         elif vol_role:
-            filtered = qs.filter(
-                Q(volunteer_role__name__iexact=vol_role) |
-                Q(role__iexact=vol_role)
-            )
+            filtered = self._filter_by_role(qs, vol_role)
             if filtered.exists():
                 qs = filtered
         elif role:
-            filtered = qs.filter(
-                Q(role__iexact=role) |
-                Q(volunteer_role__name__iexact=role)
-            )
+            filtered = self._filter_by_role(qs, role)
             if filtered.exists():
                 qs = filtered
         data = []
