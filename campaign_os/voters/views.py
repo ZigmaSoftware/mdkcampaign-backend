@@ -76,6 +76,14 @@ class VoterViewSet(viewsets.ModelViewSet):
                 q |= Q(age=int(search))
             qs = qs.filter(q)
 
+        # Age group filter: ?age_group=18-25 or ?age_group=18-25,26-35
+        age_group_param = self.request.query_params.get('age_group', '').strip()
+        if age_group_param:
+            from campaign_os.core.utils.age_utils import build_age_filter
+            age_q = build_age_filter(age_group_param)
+            if age_q:
+                qs = qs.filter(age_q)
+
         return qs
 
     @action(detail=False, methods=['GET'])

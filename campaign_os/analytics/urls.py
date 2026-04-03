@@ -17,4 +17,5 @@ urlpatterns = [
     path('wards/', AnalyticsViewSet.as_view({'get': 'ward_statistics'}), name='ward-stats'),
     path('ward-volunteers/<int:ward_id>/', AnalyticsViewSet.as_view({'get': 'ward_volunteers'}), name='ward-volunteers'),
     path('fix-links/', AnalyticsViewSet.as_view({'post': 'fix_links'}), name='fix-links'),
+    path('age-breakdown/', AnalyticsViewSet.as_view({'get': 'age_breakdown'}), name='age-breakdown'),
 ]

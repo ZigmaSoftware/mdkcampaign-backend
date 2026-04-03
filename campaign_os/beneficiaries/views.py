@@ -52,6 +52,15 @@ class BeneficiaryViewSet(viewsets.ModelViewSet):
             qs = qs.filter(booth__panchayat__name__iexact=panchayat)
         if union:
             qs = qs.filter(booth__panchayat__union__name__iexact=union)
+
+        # Age group filter: ?age_group=18-25 or ?age_group=18-25,26-35
+        age_group_param = params.get('age_group', '').strip()
+        if age_group_param:
+            from campaign_os.core.utils.age_utils import build_age_filter
+            age_q = build_age_filter(age_group_param)
+            if age_q:
+                qs = qs.filter(age_q)
+
         return qs
 
     def perform_create(self, serializer):

@@ -133,11 +133,18 @@ class WardDetailSerializer(serializers.ModelSerializer):
 
 class BoothSimpleSerializer(serializers.ModelSerializer):
     """Minimal booth info"""
-    ward_name = serializers.CharField(source='ward.name', read_only=True, default=None)
+    ward_name         = serializers.CharField(source='ward.name', read_only=True, default=None)
+    panchayat_name    = serializers.CharField(source='panchayat.name', read_only=True, default='')
+    constituency_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Booth
-        fields = ['id', 'number', 'name', 'code', 'status', 'panchayat', 'ward', 'ward_name']
+        fields = ['id', 'number', 'name', 'code', 'status', 'panchayat', 'panchayat_name', 'ward', 'ward_name', 'constituency_name']
+
+    def get_constituency_name(self, obj):
+        if obj.ward_id and hasattr(obj.ward, 'constituency') and obj.ward.constituency_id:
+            return obj.ward.constituency.name
+        return ''
 
 
 class BoothDetailSerializer(serializers.ModelSerializer):
@@ -169,6 +176,8 @@ class BoothDetailSerializer(serializers.ModelSerializer):
         ]
 
     def get_constituency_name(self, obj):
+        if obj.ward_id and hasattr(obj.ward, 'constituency') and obj.ward.constituency_id:
+            return obj.ward.constituency.name
         return ''
 
     def get_google_maps_url(self, obj):

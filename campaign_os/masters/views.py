@@ -168,7 +168,7 @@ class BoothViewSet(viewsets.ModelViewSet):
     screen_slug = "booth-master"
     queryset = (
         Booth.objects.filter(is_active=True)
-             .select_related('panchayat', 'primary_agent', 'ward')
+             .select_related('panchayat', 'primary_agent', 'ward', 'ward__constituency')
              .prefetch_related('agents')
              .annotate(number_int=Cast('number', output_field=IntegerField()))
              .order_by('number_int')

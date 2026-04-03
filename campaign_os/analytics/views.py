@@ -46,11 +46,15 @@ class AnalyticsViewSet(viewsets.ViewSet):
         if constituency_id:
             voter_qs = voter_qs.filter(village__constituency_id=constituency_id)
         
+        contacted_qs = voter_qs.filter(is_contacted=True)
         stats = {
             'total_voters': voter_qs.count(),
-            'voters_contacted': voter_qs.filter(is_contacted=True).count(),
+            'voters_contacted': contacted_qs.count(),
             'voters_by_sentiment': dict(
                 voter_qs.values('sentiment').annotate(count=Count('id')).values_list('sentiment', 'count')
+            ),
+            'contacted_by_sentiment': dict(
+                contacted_qs.values('sentiment').annotate(count=Count('id')).values_list('sentiment', 'count')
             ),
             'total_booths': Booth.objects.filter(is_active=True).count(),
             'booths_assigned': Booth.objects.filter(is_active=True, primary_agent__isnull=False).count(),
@@ -71,16 +75,22 @@ class AnalyticsViewSet(viewsets.ViewSet):
         if constituency_id:
             booths = booths.filter(panchayat__union__block__constituency_id=constituency_id)
 
+        _contacted = Q(voters__is_active=True, voters__is_contacted=True)
         booths = booths.annotate(
             actual_total=Count('voters', filter=Q(voters__is_active=True), distinct=True),
-            actual_contacted=Count('voters', filter=Q(voters__is_active=True, voters__is_contacted=True), distinct=True),
+            actual_contacted=Count('voters', filter=_contacted, distinct=True),
             vol_count=Count('volunteers', filter=Q(volunteers__is_active=True), distinct=True),
+            cnt_positive=Count('voters', filter=_contacted & Q(voters__sentiment='positive'), distinct=True),
+            cnt_neutral =Count('voters', filter=_contacted & Q(voters__sentiment='neutral'),  distinct=True),
+            cnt_negative=Count('voters', filter=_contacted & Q(voters__sentiment='negative'), distinct=True),
         ).order_by('number')
 
         stats = []
         for b in booths:
-            total = b.actual_total
+            total     = b.actual_total
             contacted = b.actual_contacted
+            pos, neu, neg = b.cnt_positive, b.cnt_neutral, b.cnt_negative
+            sentiment_base = pos + neu + neg          # voters with a known sentiment
             panchayat = b.panchayat
             union  = panchayat.union  if panchayat else None
             block  = union.block      if union     else None
@@ -88,6 +98,7 @@ class AnalyticsViewSet(viewsets.ViewSet):
                 'id': b.id,
                 'name': b.name,
                 'number': b.number,
+                'address': b.address or '',
                 'constituency_name': None,
                 'panchayat_name': panchayat.name if panchayat else '',
                 'union_name':     union.name     if union     else '',
@@ -96,6 +107,9 @@ class AnalyticsViewSet(viewsets.ViewSet):
                 'voters_contacted': contacted,
                 'coverage_percentage': round(contacted * 100 / total, 1) if total > 0 else 0,
                 'volunteer_count': b.vol_count,
+                'positive_pct': round(pos * 100 / sentiment_base, 1) if sentiment_base > 0 else 0,
+                'neutral_pct':  round(neu * 100 / sentiment_base, 1) if sentiment_base > 0 else 0,
+                'negative_pct': round(neg * 100 / sentiment_base, 1) if sentiment_base > 0 else 0,
             })
         return Response(stats)
 
@@ -349,6 +363,51 @@ class AnalyticsViewSet(viewsets.ViewSet):
             is_active=True, ward_id=ward_id
         ).values('id', 'name', 'phone', 'phone2', 'skills', 'role', 'status')
         return Response(list(volunteers))
+
+    @action(detail=False, methods=['GET'])
+    def age_breakdown(self, request):
+        """Age group breakdown for voters, volunteers, or beneficiaries.
+
+        Query params:
+          type     — 'voter' (default) | 'volunteer' | 'beneficiary'
+          booth_id — optional int, filter by booth
+          ward_id  — optional int, filter by ward / village
+        """
+        from campaign_os.core.utils.age_utils import AGE_GROUPS, age_group_q
+
+        model_type = request.query_params.get('type', 'voter')
+        booth_id   = request.query_params.get('booth_id', '').strip()
+        ward_id    = request.query_params.get('ward_id',  '').strip()
+
+        if model_type == 'volunteer':
+            qs = Volunteer.objects.filter(is_active=True)
+            if booth_id and booth_id.isdigit():
+                qs = qs.filter(Q(booth_id=booth_id) | Q(booths__id=booth_id)).distinct()
+            if ward_id and ward_id.isdigit():
+                qs = qs.filter(ward_id=ward_id)
+        elif model_type == 'beneficiary':
+            qs = Beneficiary.objects.filter(is_active=True)
+            if booth_id and booth_id.isdigit():
+                qs = qs.filter(booth_id=booth_id)
+            if ward_id and ward_id.isdigit():
+                qs = qs.filter(ward_id=ward_id)
+        else:
+            qs = Voter.objects.filter(is_active=True)
+            if booth_id and booth_id.isdigit():
+                qs = qs.filter(booth_id=booth_id)
+            if ward_id and ward_id.isdigit():
+                qs = qs.filter(village_id=ward_id)
+
+        total   = qs.count()
+        unknown = qs.filter(age__isnull=True).count()
+
+        breakdown = []
+        for group in AGE_GROUPS:
+            count = qs.filter(age_group_q(group)).count()
+            breakdown.append({'age_group': group, 'count': count})
+        breakdown.append({'age_group': 'Unknown', 'count': unknown})
+
+        return Response({'total': total, 'breakdown': breakdown})
 
     @action(detail=False, methods=['POST'])
     def fix_links(self, request):
