@@ -5,10 +5,7 @@ from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
-from campaign_os.core.permissions import (
-    ScreenPermission,
-    get_screen_permission_role_candidates,
-)
+from campaign_os.core.permissions import ScreenPermission
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
@@ -369,30 +366,40 @@ class PagePermissionViewSet(viewsets.ModelViewSet):
           }
         }
         """
-        permission_roles = get_screen_permission_role_candidates(request.user)
-        if not permission_roles:
-            permission_roles = [request.user.role]
+        role = request.user.role
 
-        # Build the effective screen permission set by taking the first
-        # matching permission row for each screen in candidate-role order.
-        all_perms = (
+        # For volunteer users, prefer the master VolunteerRole name.
+        if role == 'volunteer':
+            try:
+                from campaign_os.volunteers.models import Volunteer
+                vol = Volunteer.objects.filter(user=request.user).select_related('volunteer_role').first()
+                role_candidates = []
+
+                if vol and vol.volunteer_role and vol.volunteer_role.name:
+                    role_candidates.append(vol.volunteer_role.name.strip())
+
+                if vol and vol.volunteer_type:
+                    role_candidates.append(vol.volunteer_type.strip().lower().replace(' ', '_'))
+
+                role_candidates.append('volunteer')
+
+                for candidate in role_candidates:
+                    if candidate and UserScreenPermission.objects.filter(role=candidate).exists():
+                        role = candidate
+                        break
+            except Exception:
+                pass  # Fall back to generic 'volunteer'
+
+        # Build screen_permissions and derive allowed_pages from UserScreenPermission
+        perms = (
             UserScreenPermission.objects
-            .filter(role__in=permission_roles)
+            .filter(role=role)
             .select_related('user_screen__main_screen')
         )
-        perms_by_role = {}
-        for perm in all_perms:
-            perms_by_role.setdefault(perm.role, {})[perm.user_screen_id] = perm
-
-        effective_perms = {}
-        for role in permission_roles:
-            for screen_id, perm in perms_by_role.get(role, {}).items():
-                effective_perms.setdefault(screen_id, perm)
-
         screen_permissions = {}
         allowed_main_screens = set()
 
-        for p in effective_perms.values():
+        for p in perms:
             actions = p.allowed_actions
             if actions:
                 ms_slug = p.user_screen.main_screen.slug
@@ -404,8 +411,7 @@ class PagePermissionViewSet(viewsets.ModelViewSet):
         allowed_main_screens.add('dashboard')
 
         return Response({
-            'role': request.user.role,
-            'permission_roles': permission_roles,
+            'role': role,
             'allowed_pages': list(allowed_main_screens),
             'screen_permissions': screen_permissions,
         })
