@@ -2,6 +2,38 @@ from rest_framework import serializers
 from .models import ActivityLog, FieldSurvey
 
 
+SUPPORT_LEVEL_ALIASES = {
+    'positive': 'positive',
+    'strong support': 'positive',
+    'leaning support': 'positive',
+    'neutral': 'neutral',
+    'undecided': 'neutral',
+    'negative': 'negative',
+    'leaning against': 'negative',
+    'strong against': 'negative',
+}
+
+RESPONSE_STATUS_ALIASES = {
+    'not_reach': 'not_reach',
+    'not reach': 'not_reach',
+    'no_answer': 'no_answer',
+    'no answer': 'no_answer',
+    'need_followup': 'need_followup',
+    'need followup': 'need_followup',
+    'need_followups': 'need_followup',
+    'interested': 'need_followup',
+    'not_attend_call': 'no_answer',
+    'not attend call': 'no_answer',
+}
+
+
+def _normalize_choice_value(value, alias_map):
+    raw = (value or '').strip()
+    if not raw:
+        return ''
+    return alias_map.get(raw.lower(), raw)
+
+
 class ActivityLogSerializer(serializers.ModelSerializer):
     class Meta:
         model  = ActivityLog
@@ -24,6 +56,9 @@ class ActivityLogSerializer(serializers.ModelSerializer):
 
 
 class FieldSurveySerializer(serializers.ModelSerializer):
+    support_level = serializers.CharField(required=False, allow_blank=True)
+    response_status = serializers.CharField(required=False, allow_blank=True)
+
     class Meta:
         model  = FieldSurvey
         fields = [
@@ -50,3 +85,29 @@ class FieldSurveySerializer(serializers.ModelSerializer):
         if value and len(value.replace(' ', '').replace('-', '')) < 10:
             raise serializers.ValidationError("Enter a valid phone number (min 10 digits).")
         return value
+
+    def validate_support_level(self, value):
+        normalized = _normalize_choice_value(value, SUPPORT_LEVEL_ALIASES)
+        if not normalized:
+            return ''
+        if normalized in {'positive', 'negative', 'neutral'}:
+            return normalized
+
+        instance = getattr(self, 'instance', None)
+        if instance and (instance.support_level or '').strip() == (value or '').strip():
+            return normalized
+
+        raise serializers.ValidationError("Unsupported support level.")
+
+    def validate_response_status(self, value):
+        normalized = _normalize_choice_value(value, RESPONSE_STATUS_ALIASES)
+        if not normalized:
+            return ''
+        if normalized in {'not_reach', 'no_answer', 'need_followup'}:
+            return normalized
+
+        instance = getattr(self, 'instance', None)
+        if instance and (instance.response_status or '').strip() == (value or '').strip():
+            return normalized
+
+        raise serializers.ValidationError("Unsupported response status.")
