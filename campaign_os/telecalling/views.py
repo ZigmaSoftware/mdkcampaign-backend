@@ -1,4 +1,4 @@
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -13,12 +13,25 @@ from .workflow import WORKFLOW_LABELS, build_voter_status_map
 
 class TelecallingAssignmentViewSet(viewsets.ModelViewSet):
     screen_slug = 'assign-telecalling'
-    queryset = TelecallingAssignment.objects.filter(is_active=True).prefetch_related('voters')
+    queryset = TelecallingAssignment.objects.filter(is_active=True).prefetch_related(
+        Prefetch(
+            'voters',
+            queryset=TelecallingAssignmentVoter.objects.select_related('voter__booth'),
+        )
+    )
     serializer_class = TelecallingAssignmentSerializer
     permission_classes = [permissions.IsAuthenticated, ScreenPermission]
     filterset_fields = ['assigned_date', 'telecaller_id']
 
+    def _include_workflow(self):
+        value = (self.request.query_params.get('include_workflow') or '').strip().lower()
+        return value in {'1', 'true', 'yes'}
+
     def _with_workflow_context(self, objects):
+        ctx = self.get_serializer_context()
+        if not self._include_workflow():
+            return ctx
+
         voter_ids = set()
         for assignment in objects:
             voters_rel = getattr(assignment, 'voters', None)
@@ -27,7 +40,6 @@ class TelecallingAssignmentViewSet(viewsets.ModelViewSet):
             for voter in voters_rel.all():
                 if voter.voter_id:
                     voter_ids.add(voter.voter_id)
-        ctx = self.get_serializer_context()
         ctx['voter_status_map'] = build_voter_status_map(voter_ids)
         return ctx
 

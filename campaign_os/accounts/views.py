@@ -5,7 +5,11 @@ from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
-from campaign_os.core.permissions import ScreenPermission
+from campaign_os.core.permissions import (
+    ScreenPermission,
+    get_user_permission_roles,
+    merge_screen_permissions,
+)
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
@@ -366,53 +370,19 @@ class PagePermissionViewSet(viewsets.ModelViewSet):
           }
         }
         """
-        role = request.user.role
+        roles = get_user_permission_roles(request.user)
+        primary_role = roles[0] if roles else request.user.role
 
-        # For volunteer users, prefer the master VolunteerRole name.
-        if role == 'volunteer':
-            try:
-                from campaign_os.volunteers.models import Volunteer
-                vol = Volunteer.objects.filter(user=request.user).select_related('volunteer_role').first()
-                role_candidates = []
-
-                if vol and vol.volunteer_role and vol.volunteer_role.name:
-                    role_candidates.append(vol.volunteer_role.name.strip())
-
-                if vol and vol.volunteer_type:
-                    role_candidates.append(vol.volunteer_type.strip().lower().replace(' ', '_'))
-
-                role_candidates.append('volunteer')
-
-                for candidate in role_candidates:
-                    if candidate and UserScreenPermission.objects.filter(role=candidate).exists():
-                        role = candidate
-                        break
-            except Exception:
-                pass  # Fall back to generic 'volunteer'
-
-        # Build screen_permissions and derive allowed_pages from UserScreenPermission
         perms = (
             UserScreenPermission.objects
-            .filter(role=role)
+            .filter(role__in=roles or [request.user.role])
             .select_related('user_screen__main_screen')
         )
-        screen_permissions = {}
-        allowed_main_screens = set()
-
-        for p in perms:
-            actions = p.allowed_actions
-            if actions:
-                ms_slug = p.user_screen.main_screen.slug
-                us_slug = p.user_screen.slug
-                screen_permissions.setdefault(ms_slug, {})[us_slug] = actions
-                allowed_main_screens.add(ms_slug)
-
-        # Dashboard is always accessible (it has no UserScreen sub-entries)
-        allowed_main_screens.add('dashboard')
+        screen_permissions, allowed_main_screens = merge_screen_permissions(perms)
 
         return Response({
-            'role': role,
-            'allowed_pages': list(allowed_main_screens),
+            'role': primary_role,
+            'allowed_pages': allowed_main_screens,
             'screen_permissions': screen_permissions,
         })
 

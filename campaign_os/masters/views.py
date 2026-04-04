@@ -178,6 +178,15 @@ class BoothViewSet(viewsets.ModelViewSet):
     search_fields = ['name', 'number', 'code', 'address']
     ordering = ['number_int']
 
+    def get_permissions(self):
+        # Many entry screens need booth options for dropdowns/filters even when
+        # the user is not allowed to manage Booth Master itself. Keep the list
+        # lookup broadly available to authenticated users, while edit actions
+        # still require booth-master screen permissions.
+        if self.action == 'list':
+            return [permissions.IsAuthenticated()]
+        return [permission() for permission in self.permission_classes]
+
     def get_serializer_class(self):
         if self.action in ['create', 'update', 'partial_update', 'retrieve']:
             return BoothDetailSerializer

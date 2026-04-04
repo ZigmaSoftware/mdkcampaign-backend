@@ -30,6 +30,88 @@ ACTION_TO_FLAG = {
     'destroy':         'can_delete',
 }
 
+ACTION_ORDER = ('view', 'add', 'edit', 'delete')
+
+
+def _append_candidate(candidates, value):
+    candidate = (value or '').strip()
+    if candidate and candidate not in candidates:
+        candidates.append(candidate)
+
+
+def get_user_permission_roles(user):
+    """
+    Return all role keys that may grant screen permissions for this user.
+
+    Volunteer users can inherit permissions from their VolunteerRole master
+    name or volunteer_type in addition to the generic "volunteer" role.
+    """
+    if not user or not getattr(user, 'is_authenticated', False):
+        return []
+
+    role = (getattr(user, 'role', '') or '').strip()
+    if role != 'volunteer':
+        return [role] if role else []
+
+    candidates = []
+
+    try:
+        from campaign_os.volunteers.models import Volunteer
+
+        volunteer = (
+            Volunteer.objects
+            .filter(user=user)
+            .select_related('volunteer_role')
+            .first()
+        )
+
+        if volunteer and volunteer.volunteer_role and volunteer.volunteer_role.name:
+            _append_candidate(candidates, volunteer.volunteer_role.name)
+
+        if volunteer and volunteer.role:
+            _append_candidate(candidates, volunteer.role)
+
+        if volunteer and volunteer.volunteer_type:
+            _append_candidate(candidates, volunteer.volunteer_type)
+            _append_candidate(
+                candidates,
+                volunteer.volunteer_type.strip().lower().replace(' ', '_'),
+            )
+    except Exception:
+        pass
+
+    _append_candidate(candidates, 'volunteer')
+    return candidates
+
+
+def merge_screen_permissions(permission_rows):
+    """
+    Merge permission rows into the frontend response shape.
+    """
+    screen_permissions = {}
+    allowed_main_screens = {'dashboard'}
+
+    for permission in permission_rows:
+        actions = permission.allowed_actions
+        if not actions:
+            continue
+
+        main_slug = permission.user_screen.main_screen.slug
+        screen_slug = permission.user_screen.slug
+        bucket = screen_permissions.setdefault(main_slug, {}).setdefault(screen_slug, set())
+        bucket.update(actions)
+        allowed_main_screens.add(main_slug)
+
+    normalized_permissions = {}
+    for main_slug, screens in screen_permissions.items():
+        normalized_permissions[main_slug] = {}
+        for screen_slug, actions in screens.items():
+            normalized_permissions[main_slug][screen_slug] = [
+                action for action in ACTION_ORDER if action in actions
+            ]
+
+    return normalized_permissions, list(allowed_main_screens)
+
 
 class ScreenPermission(BasePermission):
     """
@@ -55,13 +137,14 @@ class ScreenPermission(BasePermission):
         action = getattr(view, 'action', None)
         flag = ACTION_TO_FLAG.get(action, 'can_view')
 
-        # Look up the permission record
-        from campaign_os.accounts.models import UserScreenPermission
-        try:
-            perm = UserScreenPermission.objects.get(
-                role=request.user.role,
-                user_screen__slug=screen_slug,
-            )
-            return getattr(perm, flag, False)
-        except UserScreenPermission.DoesNotExist:
+        roles = get_user_permission_roles(request.user)
+        if not roles:
             return False
+
+        # Look up permission rows across all effective roles
+        from campaign_os.accounts.models import UserScreenPermission
+        permissions_qs = UserScreenPermission.objects.filter(
+            role__in=roles,
+            user_screen__slug=screen_slug,
+        )
+        return any(getattr(permission, flag, False) for permission in permissions_qs)
