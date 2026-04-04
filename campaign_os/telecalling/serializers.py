@@ -7,9 +7,15 @@ class TelecallingAssignmentVoterSerializer(serializers.ModelSerializer):
     phone2 = serializers.CharField(required=False, allow_blank=True, write_only=True)
     alt_phoneno2 = serializers.CharField(required=False, allow_blank=True, write_only=True)
     alt_phoneno3 = serializers.CharField(required=False, allow_blank=True, write_only=True)
+    booth_no = serializers.SerializerMethodField()
     workflow_status = serializers.SerializerMethodField()
     workflow_label = serializers.SerializerMethodField()
     is_locked = serializers.SerializerMethodField()
+
+    def get_booth_no(self, obj):
+        voter = getattr(obj, 'voter', None)
+        booth = getattr(voter, 'booth', None) if voter else None
+        return getattr(booth, 'number', '') or ''
 
     def _workflow(self, obj):
         status_map = self.context.get('voter_status_map') or {}
@@ -31,7 +37,7 @@ class TelecallingAssignmentVoterSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'voter', 'voter_name', 'voter_id_no', 'phone',
             'phone2', 'alt_phoneno2', 'alt_phoneno3',
-            'address', 'booth_name', 'age', 'gender',
+            'address', 'booth_name', 'booth_no', 'age', 'gender',
             'workflow_status', 'workflow_label', 'is_locked',
         ]
 
