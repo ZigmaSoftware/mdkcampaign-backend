@@ -4,8 +4,9 @@ from rest_framework import permissions, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
-from campaign_os.dashboard.serializers import DashboardFilterSerializer
+from campaign_os.dashboard.serializers import DashboardFilterSerializer, TaskDashboardFilterSerializer
 from campaign_os.dashboard.services.dashboard_service import DashboardService
+from campaign_os.dashboard.services.task_dashboard_service import TaskDashboardService
 
 
 logger = logging.getLogger(__name__)
@@ -13,6 +14,17 @@ logger = logging.getLogger(__name__)
 
 def _validate_filters(request):
     serializer = DashboardFilterSerializer(data=request.query_params)
+    serializer.is_valid(raise_exception=True)
+    return serializer.validated_data
+
+
+def _validate_task_dashboard_filters(request):
+    params = request.query_params.copy()
+    if 'from' in params and 'from_date' not in params:
+        params['from_date'] = params['from']
+    if 'to' in params and 'to_date' not in params:
+        params['to_date'] = params['to']
+    serializer = TaskDashboardFilterSerializer(data=params)
     serializer.is_valid(raise_exception=True)
     return serializer.validated_data
 
@@ -88,6 +100,80 @@ def dashboard_filter_options(request):
                 'booths': [],
                 'telecallers': [],
                 'volunteer_roles': [],
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def task_dashboard_summary(request):
+    try:
+        data = TaskDashboardService().get_summary(_validate_task_dashboard_filters(request))
+        return Response(data)
+    except Exception:
+        logger.exception('Task dashboard summary failed')
+        return Response(
+            {
+                'filters': {},
+                'counts': {},
+                'derived': {},
+                'status_breakdown': [],
+                'due_breakdown': [],
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def task_dashboard_list(request):
+    try:
+        data = TaskDashboardService().get_list(_validate_task_dashboard_filters(request))
+        return Response(data)
+    except Exception:
+        logger.exception('Task dashboard list failed')
+        return Response({'filters': {}, 'total': 0, 'rows': []}, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def task_dashboard_type_category(request):
+    try:
+        data = TaskDashboardService().get_type_category_analytics(_validate_task_dashboard_filters(request))
+        return Response(data)
+    except Exception:
+        logger.exception('Task dashboard type/category analytics failed')
+        return Response(
+            {'filters': {}, 'type_distribution': [], 'category_workload': []},
+            status=status.HTTP_200_OK,
+        )
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def task_dashboard_campaign_activity_status(request):
+    try:
+        data = TaskDashboardService().get_campaign_activity_status(_validate_task_dashboard_filters(request))
+        return Response(data)
+    except Exception:
+        logger.exception('Task dashboard campaign activity status failed')
+        return Response({'filters': {}, 'rows': []}, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def task_dashboard_filter_options(request):
+    try:
+        data = TaskDashboardService().get_filter_options()
+        return Response(data)
+    except Exception:
+        logger.exception('Task dashboard filter options failed')
+        return Response(
+            {
+                'modules': [],
+                'task_types': [],
+                'task_categories': [],
             },
             status=status.HTTP_200_OK,
         )
