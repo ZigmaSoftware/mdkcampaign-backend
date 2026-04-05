@@ -21,6 +21,10 @@ RESPONSE_STATUS_ALIASES = {
     'need_followup': 'need_followup',
     'need followup': 'need_followup',
     'need_followups': 'need_followup',
+    'answered': 'answered',
+    'answer': 'answered',
+    'wrong_number': 'wrong_number',
+    'wrong number': 'wrong_number',
     'interested': 'need_followup',
     'not_attend_call': 'no_answer',
     'not attend call': 'no_answer',
@@ -103,7 +107,7 @@ class FieldSurveySerializer(serializers.ModelSerializer):
         normalized = _normalize_choice_value(value, RESPONSE_STATUS_ALIASES)
         if not normalized:
             return ''
-        if normalized in {'not_reach', 'no_answer', 'need_followup'}:
+        if normalized in {'not_reach', 'no_answer', 'need_followup', 'answered', 'wrong_number'}:
             return normalized
 
         instance = getattr(self, 'instance', None)

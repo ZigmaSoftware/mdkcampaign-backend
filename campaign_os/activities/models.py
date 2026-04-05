@@ -58,6 +58,8 @@ class FieldSurvey(BaseModel):
         ('not_reach',    'Not Reach'),
         ('no_answer',    'No Answer'),
         ('need_followup', 'Need Followup'),
+        ('answered',     'Answered'),
+        ('wrong_number', 'Wrong Number'),
     ]
 
     survey_date         = models.DateField(db_index=True)

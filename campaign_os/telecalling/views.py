@@ -1,4 +1,5 @@
 from django.db.models import Prefetch, Q
+from django.utils import timezone
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -23,6 +24,22 @@ class TelecallingAssignmentViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, ScreenPermission]
     filterset_fields = ['assigned_date', 'telecaller_id']
 
+    def get_queryset(self):
+        queryset = super().get_queryset()
+
+        date_value = (self.request.query_params.get('date') or '').strip()
+        if date_value:
+            queryset = queryset.filter(assigned_date=date_value)
+
+        telecaller_value = (self.request.query_params.get('telecaller') or '').strip()
+        if telecaller_value:
+            if telecaller_value.isdigit():
+                queryset = queryset.filter(telecaller_id=int(telecaller_value))
+            else:
+                queryset = queryset.filter(telecaller_name__iexact=telecaller_value)
+
+        return queryset
+
     def _include_workflow(self):
         value = (self.request.query_params.get('include_workflow') or '').strip().lower()
         return value in {'1', 'true', 'yes'}
@@ -45,8 +62,22 @@ class TelecallingAssignmentViewSet(viewsets.ModelViewSet):
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
-        page = self.paginate_queryset(queryset)
-        objects = list(page) if page is not None else list(queryset)
+        assignment_time = (request.query_params.get('assignment_time') or '').strip()
+
+        if assignment_time:
+            objects = [
+                assignment for assignment in queryset
+                if assignment.created_at
+                and timezone.localtime(assignment.created_at).strftime('%H:%M') == assignment_time
+            ]
+            page = self.paginate_queryset(objects)
+        else:
+            page = self.paginate_queryset(queryset)
+            objects = list(page) if page is not None else list(queryset)
+
+        if assignment_time and page is not None:
+            objects = list(page)
+
         serializer = self.get_serializer(
             objects,
             many=True,

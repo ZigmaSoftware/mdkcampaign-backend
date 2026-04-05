@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.utils import timezone
 from .models import TelecallingAssignment, TelecallingAssignmentVoter, TelecallingFeedback
 
 
@@ -44,12 +45,18 @@ class TelecallingAssignmentVoterSerializer(serializers.ModelSerializer):
 
 class TelecallingAssignmentSerializer(serializers.ModelSerializer):
     voters = TelecallingAssignmentVoterSerializer(many=True)
+    assignment_time = serializers.SerializerMethodField()
+
+    def get_assignment_time(self, obj):
+        if not obj.created_at:
+            return ''
+        return timezone.localtime(obj.created_at).strftime('%H:%M')
 
     class Meta:
         model  = TelecallingAssignment
         fields = [
             'id', 'telecaller_id', 'telecaller_name', 'telecaller_phone',
-            'assigned_date', 'voters', 'created_at',
+            'assigned_date', 'assignment_time', 'voters', 'created_at',
         ]
         read_only_fields = ['created_at']
 
