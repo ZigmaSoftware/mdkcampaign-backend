@@ -7,6 +7,7 @@ from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser
 from django.db.models import Q
 from django.db.models.functions import Trim
+from campaign_os.masters.models import VolunteerRole
 from campaign_os.volunteers.models import Volunteer, VolunteerTask, VolunteerAttendance
 from campaign_os.volunteers.serializers import (
     VolunteerSerializer, VolunteerTaskSerializer, VolunteerAttendanceSerializer
@@ -27,7 +28,7 @@ class VolunteerViewSet(viewsets.ModelViewSet):
 
     def get_permissions(self):
         # Allow the 'names' action for any authenticated user (used by task form)
-        if self.action == 'names':
+        if self.action in {'names', 'lookup'}:
             return [permissions.IsAuthenticated()]
         return super().get_permissions()
 
@@ -170,6 +171,71 @@ class VolunteerViewSet(viewsets.ModelViewSet):
                 'role':    v.role or '',
             })
         return Response(data)
+
+    @action(detail=False, methods=['GET'], url_path='lookup')
+    def lookup(self, request):
+        search = request.query_params.get('search', '').strip()
+        role_id = request.query_params.get('role_id', '').strip()
+        role = request.query_params.get('role', '').strip()
+        status_param = request.query_params.get('status', '').strip().lower()
+
+        try:
+            limit = int(request.query_params.get('limit', 20))
+        except (TypeError, ValueError):
+            limit = 20
+        limit = max(1, min(limit, 50))
+
+        qs = Volunteer.objects.filter(is_active=True).select_related('user', 'volunteer_role')
+
+        if status_param:
+            qs = qs.filter(status=status_param)
+        if role_id:
+            filtered = qs.filter(volunteer_role_id=role_id)
+            role_obj = VolunteerRole.objects.filter(id=role_id, is_active=True).only('name').first()
+            if role_obj and role_obj.name:
+                legacy_or_named = self._filter_by_role(qs, role_obj.name)
+                qs = (filtered | legacy_or_named).distinct()
+            else:
+                qs = filtered
+        elif role:
+            qs = self._filter_by_role(qs, role)
+
+        if search:
+            qs = qs.filter(
+                Q(name__icontains=search) |
+                Q(phone__icontains=search) |
+                Q(phone2__icontains=search) |
+                Q(user__first_name__icontains=search) |
+                Q(user__last_name__icontains=search) |
+                Q(user__username__icontains=search)
+            )
+
+        qs = qs.order_by('name', 'user__first_name', 'user__last_name', 'id')
+        total = qs.count()
+        rows = qs[:limit]
+        data = []
+        for v in rows:
+            if v.name:
+                vol_name = v.name
+            elif v.user_id:
+                vol_name = v.user.get_full_name() or v.user.username
+            else:
+                vol_name = f'Volunteer #{v.id}'
+
+            phone = v.phone or getattr(v.user, 'phone', '') or ''
+            role_name = getattr(v.volunteer_role, 'name', '') or v.role or ''
+            label = f'{vol_name} ({phone})' if phone else vol_name
+            data.append({
+                'id': v.id,
+                'user_name': vol_name,
+                'phone': phone,
+                'label': label,
+                'role': role_name,
+                'volunteer_role': v.volunteer_role_id,
+                'volunteer_role_name': getattr(v.volunteer_role, 'name', ''),
+            })
+
+        return Response({'count': total, 'results': data})
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)

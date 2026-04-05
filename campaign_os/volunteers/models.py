@@ -75,6 +75,8 @@ class Volunteer(BaseModel):
         indexes = [
             models.Index(fields=['booth']),
             models.Index(fields=['status']),
+            models.Index(fields=['name']),
+            models.Index(fields=['phone']),
         ]
 
     def __str__(self):

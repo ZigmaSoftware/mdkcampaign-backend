@@ -511,6 +511,34 @@ class VolunteerRoleViewSet(viewsets.ModelViewSet):
     filter_backends = [filters.SearchFilter]
     search_fields = ['name']
 
+    def get_permissions(self):
+        if self.action == 'lookup':
+            return [permissions.IsAuthenticated()]
+        return [permission() for permission in self.permission_classes]
+
+    @action(detail=False, methods=['GET'], url_path='lookup')
+    def lookup(self, request):
+        search = request.query_params.get('search', '').strip()
+        try:
+            limit = int(request.query_params.get('limit', 20))
+        except (TypeError, ValueError):
+            limit = 20
+        limit = max(1, min(limit, 50))
+
+        qs = self.get_queryset()
+        if search:
+            qs = qs.filter(name__icontains=search)
+
+        total = qs.count()
+        rows = qs[:limit]
+        return Response({
+            'count': total,
+            'results': [
+                {'id': role.id, 'name': role.name}
+                for role in rows
+            ],
+        })
+
     def perform_destroy(self, instance):
         instance.is_active = False
         instance.save()
