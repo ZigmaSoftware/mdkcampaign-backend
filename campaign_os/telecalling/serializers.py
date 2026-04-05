@@ -50,7 +50,7 @@ class TelecallingAssignmentSerializer(serializers.ModelSerializer):
     def get_assignment_time(self, obj):
         if not obj.created_at:
             return ''
-        return timezone.localtime(obj.created_at).strftime('%H:%M')
+        return timezone.localtime(obj.created_at).strftime('%H:%M:%S')
 
     class Meta:
         model  = TelecallingAssignment

@@ -68,7 +68,7 @@ class TelecallingAssignmentViewSet(viewsets.ModelViewSet):
             objects = [
                 assignment for assignment in queryset
                 if assignment.created_at
-                and timezone.localtime(assignment.created_at).strftime('%H:%M') == assignment_time
+                and timezone.localtime(assignment.created_at).strftime('%H:%M:%S') == assignment_time
             ]
             page = self.paginate_queryset(objects)
         else:
