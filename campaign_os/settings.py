@@ -7,13 +7,33 @@ from pathlib import Path
 from datetime import timedelta
 from decouple import config, Csv
 
+
+def config_bool(name, default=False):
+    """
+    Read boolean-ish environment values safely.
+
+    Supports standard truthy/falsey values as well as deployment-oriented
+    labels such as "release", "production", "dev", and "local" so Django
+    doesn't crash during startup when shells export non-boolean strings.
+    """
+    raw = config(name, default=default)
+    if isinstance(raw, bool):
+        return raw
+
+    value = str(raw).strip().lower()
+    if value in {'1', 'true', 'yes', 'y', 'on', 'debug', 'dev', 'local'}:
+        return True
+    if value in {'0', 'false', 'no', 'n', 'off', 'release', 'prod', 'production'}:
+        return False
+    return bool(default)
+
 # Build paths
 BASE_DIR = Path(__file__).resolve().parent.parent
 ROOT_DIR = BASE_DIR.parent
 
 # SECURITY
 SECRET_KEY = config('SECRET_KEY', default='django-insecure-dev-key-change-in-production')
-DEBUG = config('DEBUG', default=True, cast=bool)
+DEBUG = config_bool('DEBUG', default=True)
 ALLOWED_HOSTS = ['*']   # accepts all IPs including 192.168.*.*
 CORS_ALLOW_ALL_ORIGINS = True   # allow any origin on the LAN
 
@@ -42,6 +62,7 @@ INSTALLED_APPS = [
     'campaign_os.volunteers',
     'campaign_os.campaigns',
     'campaign_os.analytics',
+    'campaign_os.dashboard',
     'campaign_os.activities',
     'campaign_os.beneficiaries',
     'campaign_os.attendance',
