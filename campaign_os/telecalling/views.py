@@ -14,6 +14,7 @@ from .workflow import WORKFLOW_LABELS, build_voter_status_map
 
 class TelecallingAssignmentViewSet(viewsets.ModelViewSet):
     screen_slug = 'assign-telecalling'
+    view_permission_screen_slugs = ('telecalling-assigned', 'voter-survey', 'feedback-review', 'activity-report')
     queryset = TelecallingAssignment.objects.filter(is_active=True).prefetch_related(
         Prefetch(
             'voters',
@@ -108,6 +109,7 @@ class TelecallingAssignmentViewSet(viewsets.ModelViewSet):
 
 class TelecallingFeedbackViewSet(viewsets.ModelViewSet):
     screen_slug = 'feedback-review'
+    view_permission_screen_slugs = ('field-activity', 'activity-report')
     queryset = TelecallingFeedback.objects.filter(is_active=True).select_related('survey')
     serializer_class = TelecallingFeedbackSerializer
     permission_classes = [permissions.IsAuthenticated, ScreenPermission]

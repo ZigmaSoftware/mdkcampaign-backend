@@ -14,6 +14,7 @@ from campaign_os.core.permissions import ScreenPermission
 
 class CampaignEventViewSet(viewsets.ModelViewSet):
     screen_slug = 'campaign'
+    view_permission_screen_slugs = ('campaign-report',)
     queryset = CampaignEvent.objects.filter(is_active=True)
     serializer_class = CampaignEventSerializer
     permission_classes = [permissions.IsAuthenticated, ScreenPermission]
@@ -85,6 +86,7 @@ class CampaignEventViewSet(viewsets.ModelViewSet):
 
 class TaskViewSet(viewsets.ModelViewSet):
     screen_slug = 'event'
+    view_permission_screen_slugs = ('campaign-report',)
     queryset = Task.objects.filter(is_active=True).select_related(
         'delivery_incharge', 'delivery_incharge__user',
         'coordinator', 'coordinator__user',
@@ -217,6 +219,7 @@ class TaskViewSet(viewsets.ModelViewSet):
 
 class EventAttendeeViewSet(viewsets.ModelViewSet):
     screen_slug = 'campaign'
+    view_permission_screen_slugs = ('campaign-report',)
     queryset = EventAttendee.objects.filter(is_active=True)
     serializer_class = EventAttendeeSerializer
     permission_classes = [permissions.IsAuthenticated, ScreenPermission]

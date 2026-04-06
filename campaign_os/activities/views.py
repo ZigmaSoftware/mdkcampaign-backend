@@ -16,6 +16,83 @@ from campaign_os.telecalling.models import TelecallingFeedback
 logger = logging.getLogger(__name__)
 
 
+def _user_has_screen_flag(user, screen_slug, flag):
+    if not user or not getattr(user, 'is_authenticated', False):
+        return False
+
+    if getattr(user, 'role', '') == 'admin':
+        return True
+
+    roles = resolve_user_permission_roles(user, screen_slug=screen_slug)
+    if not roles:
+        return False
+
+    from campaign_os.accounts.models import UserScreenPermission
+
+    permissions_qs = UserScreenPermission.objects.filter(
+        role__in=roles,
+        user_screen__slug=screen_slug,
+    )
+    return any(getattr(permission, flag, False) for permission in permissions_qs)
+
+
+def _user_has_any_screen_flag(user, screen_slugs, flag):
+    for screen_slug in screen_slugs:
+        if _user_has_screen_flag(user, screen_slug, flag):
+            return True
+    return False
+
+
+def _activity_log_category_from_request(request, view):
+    action = getattr(view, 'action', None)
+    if action == 'list':
+        return (request.query_params.get('category') or '').strip().lower()
+
+    if action == 'create':
+        return (request.data.get('category') or '').strip().lower()
+
+    if action in {'retrieve', 'update', 'partial_update', 'destroy'}:
+        pk = getattr(view, 'kwargs', {}).get('pk')
+        if not pk:
+            return ''
+        return (
+            ActivityLog.objects
+            .filter(is_active=True, pk=pk)
+            .values_list('category', flat=True)
+            .first()
+            or ''
+        ).strip().lower()
+
+    return ''
+
+
+def _activity_log_permission_slugs(category, flag):
+    if flag == 'can_view':
+        return {
+            'agent': ('agent-activity', 'activity-report'),
+            'field': ('field-activity', 'feedback-review', 'activity-report'),
+            'volunteer': ('volunteer-activity', 'activity-report'),
+        }.get(category, ())
+
+    return {
+        'agent': {
+            'can_add': ('agent-activity',),
+            'can_edit': ('agent-activity',),
+            'can_delete': ('agent-activity',),
+        },
+        'field': {
+            'can_add': ('field-activity', 'feedback-review'),
+            'can_edit': ('field-activity',),
+            'can_delete': ('field-activity',),
+        },
+        'volunteer': {
+            'can_add': ('volunteer-activity',),
+            'can_edit': ('volunteer-activity',),
+            'can_delete': ('volunteer-activity',),
+        },
+    }.get(category, {}).get(flag, ())
+
+
 def _sync_voter_from_survey(instance):
     """Push support_level → voter.sentiment and party_preference → voter.preferred_party."""
     voter = instance.voter
@@ -99,11 +176,37 @@ def _sync_field_followup_status(instance, user):
     )
 
 
+class ActivityLogPermission(ScreenPermission):
+    """
+    Activity Log data is shared by agent, field, volunteer, and feedback-review
+    screens. Keep each screen independent by resolving permission from the
+    requested activity category instead of forcing everything through
+    `agent-activity`.
+    """
+
+    def has_permission(self, request, view):
+        if super().has_permission(request, view):
+            return True
+
+        action = getattr(view, 'action', None)
+        flag = ACTION_TO_FLAG.get(action, 'can_view')
+        category = _activity_log_category_from_request(request, view)
+        if not category:
+            return False
+
+        screen_slugs = _activity_log_permission_slugs(category, flag)
+        if not screen_slugs:
+            return False
+
+        return _user_has_any_screen_flag(request.user, screen_slugs, flag)
+
+
 class ActivityLogViewSet(viewsets.ModelViewSet):
     screen_slug = 'agent-activity'
+    view_permission_screen_slugs = ('activity-report',)
     queryset = ActivityLog.objects.filter(is_active=True)
     serializer_class = ActivityLogSerializer
-    permission_classes = [permissions.IsAuthenticated, ScreenPermission]
+    permission_classes = [permissions.IsAuthenticated, ActivityLogPermission]
     filterset_fields = ['category', 'date', 'username']
 
     def perform_create(self, serializer):
@@ -157,6 +260,7 @@ class FieldSurveyPermission(ScreenPermission):
 
 class FieldSurveyViewSet(viewsets.ModelViewSet):
     screen_slug = 'voter-survey'
+    view_permission_screen_slugs = ('activity-report', 'field-activity', 'feedback-review')
     queryset = FieldSurvey.objects.filter(is_active=True)
     serializer_class = FieldSurveySerializer
     permission_classes = [permissions.IsAuthenticated, FieldSurveyPermission]

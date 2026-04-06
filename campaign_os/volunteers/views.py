@@ -19,6 +19,7 @@ from campaign_os.core.permissions import ScreenPermission
 class VolunteerViewSet(viewsets.ModelViewSet):
     """Volunteer management"""
     screen_slug = 'volunteer'
+    view_permission_screen_slugs = ('volunteer-report',)
     queryset = Volunteer.objects.filter(is_active=True).select_related(
         'user', 'booth__panchayat__union__block', 'volunteer_role'
     ).prefetch_related('booths__panchayat__union')
@@ -310,6 +311,7 @@ class VolunteerViewSet(viewsets.ModelViewSet):
 
 class VolunteerTaskViewSet(viewsets.ModelViewSet):
     screen_slug = 'event'
+    view_permission_screen_slugs = ('campaign-report',)
     queryset = VolunteerTask.objects.filter(is_active=True)
     serializer_class = VolunteerTaskSerializer
     permission_classes = [permissions.IsAuthenticated, ScreenPermission]
@@ -330,6 +332,7 @@ class VolunteerTaskViewSet(viewsets.ModelViewSet):
 
 class VolunteerAttendanceViewSet(viewsets.ModelViewSet):
     screen_slug = 'attendance'
+    view_permission_screen_slugs = ('activity-report',)
     queryset = VolunteerAttendance.objects.all()
     serializer_class = VolunteerAttendanceSerializer
     permission_classes = [permissions.IsAuthenticated, ScreenPermission]

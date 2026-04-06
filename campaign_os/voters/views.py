@@ -19,6 +19,7 @@ from campaign_os.core.utils.bulk_upload import parse_upload, BulkResult, resolve
 class VoterViewSet(viewsets.ModelViewSet):
     """Voter management"""
     screen_slug = 'voter'
+    view_permission_screen_slugs = ('voter-report', 'assign-telecalling', 'telecalling-assigned')
     queryset = Voter.objects.filter(is_active=True)
     permission_classes = [permissions.IsAuthenticated, ScreenPermission]
     filterset_fields = ['village', 'sentiment', 'is_contacted', 'gender', 'pincode']
@@ -309,6 +310,7 @@ class VoterViewSet(viewsets.ModelViewSet):
 class VoterContactViewSet(viewsets.ModelViewSet):
     """Voter contact history tracking"""
     screen_slug = 'voter'
+    view_permission_screen_slugs = ('voter-report',)
     queryset = VoterContact.objects.filter(is_active=True)
     serializer_class = VoterContactSerializer
     permission_classes = [permissions.IsAuthenticated, ScreenPermission]
@@ -339,6 +341,7 @@ class VoterSurveyViewSet(viewsets.ModelViewSet):
 
 class VoterPreferenceViewSet(viewsets.ModelViewSet):
     screen_slug = 'voter'
+    view_permission_screen_slugs = ('voter-report',)
     queryset = VoterPreference.objects.filter(is_active=True)
     serializer_class = VoterPreferenceSerializer
     permission_classes = [permissions.IsAuthenticated, ScreenPermission]

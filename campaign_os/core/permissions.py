@@ -159,7 +159,7 @@ def merge_screen_permissions(permission_rows):
     return normalized_permissions, list(allowed_main_screens)
 
 
-def iter_view_permission_slugs(view):
+def iter_view_permission_slugs(view, flag=None):
     """
     Return all screen slugs that can authorize the given view.
 
@@ -168,6 +168,13 @@ def iter_view_permission_slugs(view):
     permission slug.
     """
     slugs = []
+
+    if flag == 'can_view':
+        view_slugs = getattr(view, 'view_permission_screen_slugs', None) or ()
+        for slug in view_slugs:
+            normalized = (slug or '').strip()
+            if normalized and normalized not in slugs:
+                slugs.append(normalized)
 
     extra_slugs = getattr(view, 'permission_screen_slugs', None) or ()
     for slug in extra_slugs:
@@ -198,14 +205,13 @@ class ScreenPermission(BasePermission):
         if request.user.role == 'admin':
             return True
 
-        screen_slugs = iter_view_permission_slugs(view)
-        if not screen_slugs:
-            # No screen defined — let through (backward compat)
-            return True
-
         # Determine which CRUD flag to check
         action = getattr(view, 'action', None)
         flag = ACTION_TO_FLAG.get(action, 'can_view')
+        screen_slugs = iter_view_permission_slugs(view, flag=flag)
+        if not screen_slugs:
+            # No screen defined — let through (backward compat)
+            return True
 
         from campaign_os.accounts.models import UserScreenPermission
 

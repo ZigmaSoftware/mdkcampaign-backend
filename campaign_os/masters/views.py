@@ -122,6 +122,7 @@ class ConstituencyViewSet(viewsets.ModelViewSet):
 
 class WardViewSet(viewsets.ModelViewSet):
     screen_slug = "ward"
+    view_permission_screen_slugs = ('agent-activity', 'volunteer-activity')
     queryset = Ward.objects.filter(is_active=True).select_related('constituency')
     permission_classes = [permissions.IsAuthenticated, ScreenPermission]
     filterset_fields = ['constituency', 'booths']
@@ -276,6 +277,7 @@ class BoothViewSet(viewsets.ModelViewSet):
 
 class PollingAreaViewSet(viewsets.ModelViewSet):
     screen_slug = "area"
+    view_permission_screen_slugs = ('feedback-review',)
     queryset = PollingArea.objects.filter(is_active=True).select_related('constituency')
     serializer_class = PollingAreaSerializer
     permission_classes = [permissions.IsAuthenticated, ScreenPermission]
@@ -285,6 +287,7 @@ class PollingAreaViewSet(viewsets.ModelViewSet):
 
 class PartyViewSet(viewsets.ModelViewSet):
     screen_slug = "party"
+    view_permission_screen_slugs = ('field-activity', 'feedback-review')
     queryset = Party.objects.filter(is_active=True)
     serializer_class = PartySerializer
     permission_classes = [permissions.IsAuthenticated, ScreenPermission]
@@ -504,6 +507,7 @@ class VolunteerTypeViewSet(viewsets.ModelViewSet):
 
 class VolunteerRoleViewSet(viewsets.ModelViewSet):
     screen_slug = 'volunteer-role'
+    view_permission_screen_slugs = ('assign-telecalling',)
     """Volunteer Role master — drives the role dropdown in Volunteer Entry"""
     queryset = VolunteerRole.objects.filter(is_active=True).order_by('order', 'name')
     serializer_class = VolunteerRoleSerializer
@@ -546,6 +550,7 @@ class VolunteerRoleViewSet(viewsets.ModelViewSet):
 
 class UnionViewSet(viewsets.ModelViewSet):
     screen_slug = 'union'
+    view_permission_screen_slugs = ('feedback-review',)
     queryset = Union.objects.filter(is_active=True).select_related('block').order_by('name')
     serializer_class = UnionSerializer
     permission_classes = [permissions.IsAuthenticated, ScreenPermission]
@@ -560,6 +565,7 @@ class UnionViewSet(viewsets.ModelViewSet):
 
 class PanchayatViewSet(viewsets.ModelViewSet):
     screen_slug = 'panchayat'
+    view_permission_screen_slugs = ('field-activity', 'feedback-review')
     queryset = Panchayat.objects.filter(is_active=True).select_related('union').order_by('name')
     serializer_class = PanchayatSerializer
     permission_classes = [permissions.IsAuthenticated, ScreenPermission]

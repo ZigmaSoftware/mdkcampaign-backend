@@ -22,6 +22,7 @@ class AttendanceViewSet(viewsets.ReadOnlyModelViewSet):
     GET  /attendance/my_history/
     """
     screen_slug = 'attendance'
+    view_permission_screen_slugs = ('activity-report',)
     queryset = Attendance.objects.all()
     serializer_class = AttendanceSerializer
     permission_classes = [permissions.IsAuthenticated, ScreenPermission]
