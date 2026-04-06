@@ -159,6 +159,30 @@ def merge_screen_permissions(permission_rows):
     return normalized_permissions, list(allowed_main_screens)
 
 
+def iter_view_permission_slugs(view):
+    """
+    Return all screen slugs that can authorize the given view.
+
+    Most views use a single `screen_slug`. A few compatibility paths, such as
+    User Settings, may expose the same backend view under more than one
+    permission slug.
+    """
+    slugs = []
+
+    extra_slugs = getattr(view, 'permission_screen_slugs', None) or ()
+    for slug in extra_slugs:
+        normalized = (slug or '').strip()
+        if normalized and normalized not in slugs:
+            slugs.append(normalized)
+
+    screen_slug = getattr(view, 'screen_slug', None)
+    normalized_screen_slug = (screen_slug or '').strip() if isinstance(screen_slug, str) else screen_slug
+    if normalized_screen_slug and normalized_screen_slug not in slugs:
+        slugs.append(normalized_screen_slug)
+
+    return slugs
+
+
 class ScreenPermission(BasePermission):
     """
     Enforces UserScreenPermission for a viewset's declared `screen_slug`.
@@ -174,8 +198,8 @@ class ScreenPermission(BasePermission):
         if request.user.role == 'admin':
             return True
 
-        screen_slug = getattr(view, 'screen_slug', None)
-        if not screen_slug:
+        screen_slugs = iter_view_permission_slugs(view)
+        if not screen_slugs:
             # No screen defined — let through (backward compat)
             return True
 
@@ -183,14 +207,18 @@ class ScreenPermission(BasePermission):
         action = getattr(view, 'action', None)
         flag = ACTION_TO_FLAG.get(action, 'can_view')
 
-        roles = resolve_user_permission_roles(request.user, screen_slug=screen_slug)
-        if not roles:
-            return False
-
-        # Look up permission rows for the resolved effective role
         from campaign_os.accounts.models import UserScreenPermission
-        permissions_qs = UserScreenPermission.objects.filter(
-            role__in=roles,
-            user_screen__slug=screen_slug,
-        )
-        return any(getattr(permission, flag, False) for permission in permissions_qs)
+
+        for screen_slug in screen_slugs:
+            roles = resolve_user_permission_roles(request.user, screen_slug=screen_slug)
+            if not roles:
+                continue
+
+            permissions_qs = UserScreenPermission.objects.filter(
+                role__in=roles,
+                user_screen__slug=screen_slug,
+            )
+            if any(getattr(permission, flag, False) for permission in permissions_qs):
+                return True
+
+        return False

@@ -150,6 +150,7 @@ class UserViewSet(viewsets.ModelViewSet):
         POST /api/v1/auth/users/change-password/ - Change password
     """
     screen_slug = 'user'
+    permission_screen_slugs = ('user', 'user-mgmt')
     queryset = User.objects.filter(is_active=True).select_related(
         'state', 'district', 'constituency', 'booth', 'volunteer_profile__volunteer_role'
     )
