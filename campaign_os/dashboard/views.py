@@ -32,6 +32,13 @@ def _has_view_access(request, screen_slug):
     ).exists()
 
 
+def _has_any_view_access(request, screen_slugs):
+    for screen_slug in screen_slugs:
+        if _has_view_access(request, screen_slug):
+            return True
+    return False
+
+
 def _forbidden_response():
     return Response({'detail': 'You do not have permission to view this dashboard.'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -56,7 +63,15 @@ def _validate_task_dashboard_filters(request):
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
 def dashboard_summary(request):
-    if not _has_view_access(request, 'activity-dashboard'):
+    if not _has_any_view_access(request, (
+        'activity-dashboard',
+        'dashboard-home',
+        'report-overview',
+        'voter-report',
+        'volunteer-report',
+        'campaign-report',
+        'activity-report',
+    )):
         return _forbidden_response()
     try:
         data = DashboardService().get_summary(_validate_filters(request))
@@ -80,7 +95,14 @@ def dashboard_summary(request):
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
 def dashboard_booths(request):
-    if not _has_view_access(request, 'activity-dashboard'):
+    if not _has_any_view_access(request, (
+        'activity-dashboard',
+        'report-overview',
+        'voter-report',
+        'volunteer-report',
+        'campaign-report',
+        'activity-report',
+    )):
         return _forbidden_response()
     try:
         data = DashboardService().get_booth_ranking(_validate_filters(request))

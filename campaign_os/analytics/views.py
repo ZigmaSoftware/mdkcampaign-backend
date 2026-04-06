@@ -80,23 +80,74 @@ class AnalyticsViewSet(viewsets.ViewSet):
         if constituency_id:
             booths = booths.filter(panchayat__union__block__constituency_id=constituency_id)
 
-        _contacted = Q(voters__is_active=True, voters__is_contacted=True)
         booths = booths.annotate(
             actual_total=Count('voters', filter=Q(voters__is_active=True), distinct=True),
-            actual_contacted=Count('voters', filter=_contacted, distinct=True),
             vol_count=Count('volunteers', filter=Q(volunteers__is_active=True), distinct=True),
-            cnt_positive=Count('voters', filter=_contacted & Q(voters__sentiment='positive'), distinct=True),
-            cnt_neutral =Count('voters', filter=_contacted & Q(voters__sentiment='neutral'),  distinct=True),
-            cnt_negative=Count('voters', filter=_contacted & Q(voters__sentiment='negative'), distinct=True),
         ).order_by('number')
+        booth_list = list(booths)
+
+        try:
+            booth_ids = [booth.id for booth in booth_list]
+            booth_number_map = {
+                (booth.number or '').strip(): booth.id
+                for booth in booth_list
+                if (booth.number or '').strip()
+            }
+
+            linked_survey_map = {}
+            if booth_ids:
+                linked_rows = (
+                    FieldSurvey.objects.filter(is_active=True, voter__isnull=False, voter__booth_id__in=booth_ids)
+                    .values('voter__booth_id')
+                    .annotate(
+                        surveyed=Count('voter', distinct=True),
+                        positive=Count('id', filter=Q(support_level='positive')),
+                        neutral=Count('id', filter=Q(support_level='neutral')),
+                        negative=Count('id', filter=Q(support_level='negative')),
+                    )
+                )
+                linked_survey_map = {
+                    row['voter__booth_id']: row
+                    for row in linked_rows
+                }
+
+            unlinked_survey_map = {}
+            if booth_number_map:
+                unlinked_rows = (
+                    FieldSurvey.objects.filter(
+                        is_active=True,
+                        voter__isnull=True,
+                        booth_no__in=list(booth_number_map.keys()),
+                    )
+                    .values('booth_no')
+                    .annotate(
+                        surveyed=Count('id'),
+                        positive=Count('id', filter=Q(support_level='positive')),
+                        neutral=Count('id', filter=Q(support_level='neutral')),
+                        negative=Count('id', filter=Q(support_level='negative')),
+                    )
+                )
+                unlinked_survey_map = {
+                    booth_number_map.get((row.get('booth_no') or '').strip()): row
+                    for row in unlinked_rows
+                    if booth_number_map.get((row.get('booth_no') or '').strip())
+                }
+        except Exception:
+            logger.exception("Report booth survey aggregation failed; falling back to base booth rows")
+            linked_survey_map = {}
+            unlinked_survey_map = {}
 
         stats = []
-        for b in booths:
+        for b in booth_list:
             # Use actual FK-linked count; fall back to the stored total_voters when
             # voters haven't been linked to this booth via FK yet (data import gap).
             total     = b.actual_total or b.total_voters or 0
-            contacted = b.actual_contacted
-            pos, neu, neg = b.cnt_positive, b.cnt_neutral, b.cnt_negative
+            linked_stats = linked_survey_map.get(b.id, {})
+            unlinked_stats = unlinked_survey_map.get(b.id, {})
+            surveyed = (linked_stats.get('surveyed') or 0) + (unlinked_stats.get('surveyed') or 0)
+            pos = (linked_stats.get('positive') or 0) + (unlinked_stats.get('positive') or 0)
+            neu = (linked_stats.get('neutral') or 0) + (unlinked_stats.get('neutral') or 0)
+            neg = (linked_stats.get('negative') or 0) + (unlinked_stats.get('negative') or 0)
             sentiment_base = pos + neu + neg
             panchayat = b.panchayat
             union  = panchayat.union  if panchayat else None
@@ -112,12 +163,17 @@ class AnalyticsViewSet(viewsets.ViewSet):
                 'union_name':     union.name     if union     else '',
                 'block_name':     block.name     if block     else '',
                 'total_voters':       total,
-                'voters_contacted':   contacted,
-                'coverage_percentage': round(contacted * 100 / total, 1) if total > 0 else 0,
+                'voters_contacted':   surveyed,
+                'coverage_percentage': round(surveyed * 100 / total, 1) if total > 0 else 0,
                 'volunteer_count':    b.vol_count,
                 'positive_pct': round(pos * 100 / sentiment_base, 1) if sentiment_base > 0 else 0,
                 'neutral_pct':  round(neu * 100 / sentiment_base, 1) if sentiment_base > 0 else 0,
                 'negative_pct': round(neg * 100 / sentiment_base, 1) if sentiment_base > 0 else 0,
+                'survey_count': surveyed,
+                'survey_positive': pos,
+                'survey_neutral': neu,
+                'survey_negative': neg,
+                'survey_coverage_pct': round(surveyed * 100 / total, 1) if total > 0 else 0,
             })
         return Response(stats)
 
@@ -140,6 +196,102 @@ class AnalyticsViewSet(viewsets.ViewSet):
             dict(request.GET),
             getattr(request.user, 'id', None),
         )
+
+        contacted_only = (request.query_params.get('contacted_only') or '').strip().lower() in {'1', 'true', 'yes'}
+        booth = Booth.objects.filter(is_active=True, id=booth_id).only('id', 'number', 'name').first()
+        if not booth:
+            return Response([])
+
+        if contacted_only:
+            linked_surveys = (
+                FieldSurvey.objects.filter(is_active=True, voter__isnull=False, voter__booth_id=booth_id)
+                .select_related('voter__village')
+                .order_by('voter_id', '-survey_date', '-created_at', '-id')
+            )
+            latest_linked_surveys = {}
+            for survey in linked_surveys:
+                if survey.voter_id and survey.voter_id not in latest_linked_surveys:
+                    latest_linked_surveys[survey.voter_id] = survey
+
+            linked_voter_ids = [
+                _norm_voter_id(survey.voter.voter_id)
+                for survey in latest_linked_surveys.values()
+                if survey.voter_id and survey.voter and _norm_voter_id(survey.voter.voter_id)
+            ]
+
+            volunteer_ids = set()
+            beneficiary_ids = set()
+            if linked_voter_ids:
+                volunteer_ids = set(
+                    Volunteer.objects.filter(is_active=True, voter_id__isnull=False)
+                    .annotate(norm_voter_id=Upper(Trim(F('voter_id'))))
+                    .filter(norm_voter_id__in=linked_voter_ids)
+                    .values_list('norm_voter_id', flat=True)
+                )
+                beneficiary_ids = set(
+                    Beneficiary.objects.filter(is_active=True, voter_id__isnull=False)
+                    .annotate(norm_voter_id=Upper(Trim(F('voter_id'))))
+                    .filter(norm_voter_id__in=linked_voter_ids)
+                    .values_list('norm_voter_id', flat=True)
+                )
+
+            contacted_rows = []
+            for survey in latest_linked_surveys.values():
+                voter = survey.voter
+                voter_id = _norm_voter_id(voter.voter_id if voter else '')
+                is_volunteer = bool(voter_id and voter_id in volunteer_ids)
+                is_beneficiary = bool(voter_id and voter_id in beneficiary_ids)
+
+                if is_volunteer:
+                    voter_type = 'Volunteer'
+                elif is_beneficiary:
+                    voter_type = 'Beneficiary'
+                else:
+                    voter_type = None
+
+                contacted_rows.append({
+                    'id': voter.id if voter else survey.id,
+                    'voter_id': voter.voter_id if voter else None,
+                    'name': survey.voter_name or (voter.name if voter else None),
+                    'age': survey.age if survey.age is not None else (voter.age if voter else None),
+                    'gender': survey.gender or (voter.gender if voter else None),
+                    'sentiment': survey.support_level or (voter.sentiment if voter else None),
+                    'is_contacted': True,
+                    'phone': survey.phone or (voter.phone if voter else None),
+                    'ward_name': (getattr(voter.village, 'name', '') if voter and voter.village_id else '') or survey.village or None,
+                    'voter_type': voter_type,
+                    'is_volunteer_type': is_volunteer,
+                    'is_beneficiary_type': is_beneficiary,
+                })
+
+            booth_number = (booth.number or '').strip()
+            if booth_number:
+                unlinked_surveys = (
+                    FieldSurvey.objects.filter(
+                        is_active=True,
+                        voter__isnull=True,
+                        booth_no__iexact=booth_number,
+                    )
+                    .order_by('-survey_date', '-created_at', '-id')
+                )
+                for survey in unlinked_surveys:
+                    contacted_rows.append({
+                        'id': -survey.id,
+                        'voter_id': None,
+                        'name': survey.voter_name,
+                        'age': survey.age,
+                        'gender': survey.gender,
+                        'sentiment': survey.support_level,
+                        'is_contacted': True,
+                        'phone': survey.phone or None,
+                        'ward_name': survey.village or None,
+                        'voter_type': None,
+                        'is_volunteer_type': False,
+                        'is_beneficiary_type': False,
+                    })
+
+            contacted_rows.sort(key=lambda row: ((row.get('ward_name') or ''), (row.get('name') or '')))
+            return Response(contacted_rows)
 
         base_rows = list(
             Voter.objects.filter(is_active=True, booth_id=booth_id)
