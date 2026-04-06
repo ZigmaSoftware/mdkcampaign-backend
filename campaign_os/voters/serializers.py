@@ -30,9 +30,24 @@ class VoterSerializer(serializers.ModelSerializer):
     booth_name      = serializers.CharField(source='booth.name',      read_only=True, default='')
     village_name    = serializers.CharField(source='village.name',    read_only=True, default='')
     party_name      = serializers.SerializerMethodField()
+    workflow_status = serializers.SerializerMethodField()
+    workflow_label  = serializers.SerializerMethodField()
+    is_locked       = serializers.SerializerMethodField()
 
     def get_party_name(self, obj):
         return obj.preferred_party.name if obj.preferred_party_id else ''
+
+    def _workflow(self, obj):
+        return (self.context.get('voter_status_map') or {}).get(obj.id, {})
+
+    def get_workflow_status(self, obj):
+        return self._workflow(obj).get('status', '')
+
+    def get_workflow_label(self, obj):
+        return self._workflow(obj).get('label', '')
+
+    def get_is_locked(self, obj):
+        return self._workflow(obj).get('is_locked', False)
 
     class Meta:
         model = Voter
@@ -44,6 +59,7 @@ class VoterSerializer(serializers.ModelSerializer):
             'education_level', 'occupation', 'sentiment', 'preferred_party',
             'party_name', 'is_contacted', 'last_contacted_at', 'contact_count',
             'has_attended_event', 'is_volunteer', 'feedback_score', 'notes',
+            'workflow_status', 'workflow_label', 'is_locked',
             'created_at', 'updated_at'
         ]
 

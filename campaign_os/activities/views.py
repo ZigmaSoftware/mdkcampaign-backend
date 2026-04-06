@@ -1,7 +1,11 @@
 import logging
+import re
 
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework import viewsets, permissions
+from rest_framework.decorators import action
+from rest_framework.response import Response
 
 from .models import ActivityLog, FieldSurvey
 from .serializers import ActivityLogSerializer, FieldSurveySerializer
@@ -14,6 +18,7 @@ from campaign_os.telecalling.models import TelecallingFeedback
 
 
 logger = logging.getLogger(__name__)
+SURVEY_ID_PATTERN = re.compile(r'\[survey_id:(\d+)\]')
 
 
 def _user_has_screen_flag(user, screen_slug, flag):
@@ -284,3 +289,111 @@ class FieldSurveyViewSet(viewsets.ModelViewSet):
     def perform_destroy(self, instance):
         instance.is_active = False
         instance.save()
+
+    @action(detail=False, methods=['get'], url_path='followup-list')
+    def followup_list(self, request):
+        feedbacks = list(
+            TelecallingFeedback.objects
+            .filter(is_active=True, followup_type='field_survey', survey__isnull=False)
+            .order_by('-date', '-created_at', '-id')
+        )
+        latest_feedback_by_survey = {}
+        field_survey_ids = set()
+        for feedback in feedbacks:
+            if feedback.survey_id:
+                field_survey_ids.add(feedback.survey_id)
+                if feedback.survey_id not in latest_feedback_by_survey:
+                    latest_feedback_by_survey[feedback.survey_id] = feedback
+
+        log_notes = ActivityLog.objects.filter(
+            is_active=True,
+            category='field',
+            notes__contains='[survey_id:',
+        ).values_list('notes', flat=True)
+        for note in log_notes:
+            match = SURVEY_ID_PATTERN.search(note or '')
+            if match:
+                field_survey_ids.add(int(match.group(1)))
+
+        surveys = list(
+            FieldSurvey.objects
+            .filter(is_active=True, id__in=field_survey_ids)
+            .order_by('-survey_date', '-created_at', '-id')
+        )
+
+        base_enriched = []
+        volunteer_names = set()
+        for survey in surveys:
+            decision = latest_feedback_by_survey.get(survey.id)
+            if survey.assigned_volunteer:
+                volunteer_names.add(survey.assigned_volunteer)
+            base_enriched.append({
+                'id': survey.id,
+                'survey_date': str(survey.survey_date) if survey.survey_date else '',
+                'block': survey.block or '',
+                'village': survey.village or '',
+                'booth_no': survey.booth_no or '',
+                'voter_name': survey.voter_name or '',
+                'age': survey.age,
+                'gender': survey.gender or '',
+                'phone': survey.phone or '',
+                'address': survey.address or '',
+                'aware_of_candidate': survey.aware_of_candidate or '',
+                'likely_to_vote': survey.likely_to_vote or '',
+                'support_level': survey.support_level or '',
+                'party_preference': survey.party_preference or '',
+                'remarks': survey.remarks or '',
+                'response_status': survey.response_status or '',
+                'surveyed_by': survey.surveyed_by or '',
+                'assigned_volunteer': survey.assigned_volunteer or '',
+                'decision': {
+                    'action': decision.action,
+                    'followup_type': decision.followup_type or '',
+                    'date': str(decision.date),
+                } if decision else None,
+            })
+
+        base_counts = {
+            'all': len(base_enriched),
+            'pending': sum(1 for row in base_enriched if not row['decision'] or row['decision']['action'] != 'followup_not_required'),
+            'done': sum(1 for row in base_enriched if row['decision'] and row['decision']['action'] == 'followup_not_required'),
+        }
+
+        filtered_enriched = base_enriched
+        search = (request.query_params.get('search') or '').strip().lower()
+        if search:
+            filtered_enriched = [
+                row for row in filtered_enriched
+                if search in (row['voter_name'] or '').lower()
+                or search in (row['booth_no'] or '').lower()
+                or search in (row['block'] or '').lower()
+            ]
+
+        booth = (request.query_params.get('booth') or '').strip()
+        if booth:
+            filtered_enriched = [row for row in filtered_enriched if (row['booth_no'] or '') == booth]
+
+        volunteer = (request.query_params.get('volunteer') or '').strip()
+        if volunteer:
+            filtered_enriched = [row for row in filtered_enriched if (row['assigned_volunteer'] or '') == volunteer]
+
+        filtered_counts = {
+            'all': len(filtered_enriched),
+            'pending': sum(1 for row in filtered_enriched if not row['decision'] or row['decision']['action'] != 'followup_not_required'),
+            'done': sum(1 for row in filtered_enriched if row['decision'] and row['decision']['action'] == 'followup_not_required'),
+        }
+
+        status_filter = (request.query_params.get('status') or 'all').strip().lower()
+        enriched = filtered_enriched
+        if status_filter == 'pending':
+            enriched = [row for row in filtered_enriched if not row['decision'] or row['decision']['action'] != 'followup_not_required']
+        elif status_filter == 'done':
+            enriched = [row for row in filtered_enriched if row['decision'] and row['decision']['action'] == 'followup_not_required']
+
+        page = self.paginate_queryset(enriched)
+        payload = page if page is not None else enriched
+        response = self.get_paginated_response(payload) if page is not None else Response({'results': payload, 'count': len(payload)})
+        response.data['counts'] = base_counts
+        response.data['filtered_counts'] = filtered_counts
+        response.data['volunteers'] = sorted(volunteer_names)
+        return response

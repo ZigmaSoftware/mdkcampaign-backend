@@ -9,6 +9,7 @@ from django.db.models import Q, Count, F, Value, IntegerField, Case, When, TextF
 from django.db.models.functions import Coalesce, Trim, Lower
 from campaign_os.voters.models import Voter, VoterContact, VoterSurvey, VoterPreference, VoterFeedback
 from campaign_os.core.permissions import ScreenPermission
+from campaign_os.telecalling.workflow import build_voter_status_map
 from campaign_os.voters.serializers import (
     VoterSerializer, VoterSimpleSerializer, VoterFamilyMappingSerializer, VoterContactSerializer,
     VoterSurveySerializer, VoterPreferenceSerializer, VoterFeedbackSerializer
@@ -154,6 +155,54 @@ class VoterViewSet(viewsets.ModelViewSet):
                 qs = qs.exclude(has_contact_q)
 
         return qs
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        include_workflow = (request.query_params.get('include_workflow') or '').strip().lower() in {'1', 'true', 'yes'}
+        workflow_status = (request.query_params.get('workflow_status') or '').strip().lower()
+
+        voter_status_map = {}
+        workflow_summary = {}
+        raw_count = None
+
+        if include_workflow or workflow_status:
+            voter_ids = list(queryset.values_list('id', flat=True))
+            raw_count = len(voter_ids)
+            voter_status_map = build_voter_status_map(voter_ids)
+
+            def resolved_status(voter_id):
+                return voter_status_map.get(voter_id, {}).get('status', 'unassigned')
+
+            for voter_id in voter_ids:
+                status_key = resolved_status(voter_id)
+                workflow_summary[status_key] = workflow_summary.get(status_key, 0) + 1
+
+            if workflow_status:
+                matching_ids = [voter_id for voter_id in voter_ids if resolved_status(voter_id) == workflow_status]
+                queryset = queryset.filter(id__in=matching_ids)
+
+        page = self.paginate_queryset(queryset)
+        objects = list(page) if page is not None else list(queryset)
+        page_status_map = voter_status_map
+        if include_workflow or workflow_status:
+            object_ids = [obj.id for obj in objects]
+            page_status_map = {voter_id: voter_status_map.get(voter_id, {}) for voter_id in object_ids}
+
+        serializer = self.get_serializer(objects, many=True, context={**self.get_serializer_context(), 'voter_status_map': page_status_map})
+        if page is not None:
+            response = self.get_paginated_response(serializer.data)
+            if include_workflow or workflow_status:
+                response.data['workflow_summary'] = workflow_summary
+                if raw_count is not None:
+                    response.data['raw_count'] = raw_count
+            return response
+
+        payload = {'results': serializer.data, 'count': len(serializer.data)}
+        if include_workflow or workflow_status:
+            payload['workflow_summary'] = workflow_summary
+            if raw_count is not None:
+                payload['raw_count'] = raw_count
+        return Response(payload)
 
     @action(detail=False, methods=['GET'])
     def by_booth(self, request):
