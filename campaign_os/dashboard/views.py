@@ -4,12 +4,36 @@ from rest_framework import permissions, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
+from campaign_os.accounts.models import UserScreenPermission
+from campaign_os.core.permissions import resolve_user_permission_roles
 from campaign_os.dashboard.serializers import DashboardFilterSerializer, TaskDashboardFilterSerializer
 from campaign_os.dashboard.services.dashboard_service import DashboardService
 from campaign_os.dashboard.services.task_dashboard_service import TaskDashboardService
 
 
 logger = logging.getLogger(__name__)
+
+
+def _has_view_access(request, screen_slug):
+    user = request.user
+    if not user or not user.is_authenticated:
+        return False
+    if getattr(user, 'role', '') == 'admin':
+        return True
+
+    roles = resolve_user_permission_roles(user, screen_slug=screen_slug)
+    if not roles:
+        return False
+
+    return UserScreenPermission.objects.filter(
+        role__in=roles,
+        user_screen__slug=screen_slug,
+        can_view=True,
+    ).exists()
+
+
+def _forbidden_response():
+    return Response({'detail': 'You do not have permission to view this dashboard.'}, status=status.HTTP_403_FORBIDDEN)
 
 
 def _validate_filters(request):
@@ -32,6 +56,8 @@ def _validate_task_dashboard_filters(request):
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
 def dashboard_summary(request):
+    if not _has_view_access(request, 'activity-dashboard'):
+        return _forbidden_response()
     try:
         data = DashboardService().get_summary(_validate_filters(request))
         return Response(data)
@@ -54,6 +80,8 @@ def dashboard_summary(request):
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
 def dashboard_booths(request):
+    if not _has_view_access(request, 'activity-dashboard'):
+        return _forbidden_response()
     try:
         data = DashboardService().get_booth_ranking(_validate_filters(request))
         return Response(data)
@@ -65,6 +93,8 @@ def dashboard_booths(request):
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
 def dashboard_telecallers(request):
+    if not _has_view_access(request, 'activity-dashboard'):
+        return _forbidden_response()
     try:
         data = DashboardService().get_telecaller_efficiency(_validate_filters(request))
         return Response(data)
@@ -76,6 +106,8 @@ def dashboard_telecallers(request):
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
 def dashboard_tasks(request):
+    if not _has_view_access(request, 'activity-dashboard'):
+        return _forbidden_response()
     try:
         data = DashboardService().get_task_panel(_validate_filters(request))
         return Response(data)
@@ -87,6 +119,8 @@ def dashboard_tasks(request):
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
 def dashboard_filter_options(request):
+    if not _has_view_access(request, 'activity-dashboard'):
+        return _forbidden_response()
     try:
         data = DashboardService().get_filter_options()
         return Response(data)
@@ -108,6 +142,8 @@ def dashboard_filter_options(request):
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
 def task_dashboard_summary(request):
+    if not _has_view_access(request, 'task-dashboard'):
+        return _forbidden_response()
     try:
         data = TaskDashboardService().get_summary(_validate_task_dashboard_filters(request))
         return Response(data)
@@ -128,6 +164,8 @@ def task_dashboard_summary(request):
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
 def task_dashboard_list(request):
+    if not _has_view_access(request, 'task-dashboard'):
+        return _forbidden_response()
     try:
         data = TaskDashboardService().get_list(_validate_task_dashboard_filters(request))
         return Response(data)
@@ -139,6 +177,8 @@ def task_dashboard_list(request):
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
 def task_dashboard_type_category(request):
+    if not _has_view_access(request, 'task-dashboard'):
+        return _forbidden_response()
     try:
         data = TaskDashboardService().get_type_category_analytics(_validate_task_dashboard_filters(request))
         return Response(data)
@@ -153,6 +193,8 @@ def task_dashboard_type_category(request):
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
 def task_dashboard_campaign_activity_status(request):
+    if not _has_view_access(request, 'task-dashboard'):
+        return _forbidden_response()
     try:
         data = TaskDashboardService().get_campaign_activity_status(_validate_task_dashboard_filters(request))
         return Response(data)
@@ -164,6 +206,8 @@ def task_dashboard_campaign_activity_status(request):
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
 def task_dashboard_filter_options(request):
+    if not _has_view_access(request, 'task-dashboard'):
+        return _forbidden_response()
     try:
         data = TaskDashboardService().get_filter_options()
         return Response(data)

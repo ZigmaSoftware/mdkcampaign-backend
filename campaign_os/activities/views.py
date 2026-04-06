@@ -5,7 +5,11 @@ from rest_framework import viewsets, permissions
 
 from .models import ActivityLog, FieldSurvey
 from .serializers import ActivityLogSerializer, FieldSurveySerializer
-from campaign_os.core.permissions import ScreenPermission, ACTION_TO_FLAG, get_user_permission_roles
+from campaign_os.core.permissions import (
+    ScreenPermission,
+    ACTION_TO_FLAG,
+    resolve_user_permission_roles,
+)
 from campaign_os.telecalling.models import TelecallingFeedback
 
 
@@ -137,7 +141,7 @@ class FieldSurveyPermission(ScreenPermission):
         if request.user.role == 'admin':
             return True
 
-        roles = get_user_permission_roles(request.user)
+        roles = resolve_user_permission_roles(request.user, screen_slug='field-activity')
         if not roles:
             return False
 

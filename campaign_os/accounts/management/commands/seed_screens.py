@@ -28,6 +28,11 @@ MAIN_SCREENS = [
 # ── User screens per main screen ───────────────────────────────────────────────
 # (main_screen_slug, slug, name, icon, order)
 USER_SCREENS = [
+    # ── Dashboard pages ──────────────────────────────────────────────────────
+    ('dashboard', 'dashboard-home',    'Dashboard',          'ph ph-gauge',           1),
+    ('dashboard', 'activity-dashboard','Activity Dashboard', 'ph ph-chart-pie-slice', 2),
+    ('dashboard', 'task-dashboard',    'Task Dashboard',     'ph ph-kanban',          3),
+
     # ── Entry forms ──────────────────────────────────────────────────────────
     ('entry', 'voter',               'Voter Details',        'ph ph-user',                1),
     ('entry', 'booth',               'Booth Info',           'ph ph-map-pin',             2),
@@ -91,9 +96,48 @@ _GEO_MASTERS = ['district', 'constituency', 'ward', 'area', 'booth-master',
                  'party', 'candidate', 'scheme', 'task-category', 'campaign-activity',
                  'volunteer-role', 'volunteer-type', 'panchayat', 'union']
 
+_DASHBOARD_HOME_ROLES = [
+    'volunteer',
+    'member',
+    'district_head',
+    'constituency_mgr',
+    'booth_agent',
+    'voter',
+    'analyst',
+    'observer',
+    'party_worker',
+    'alliance_volunteer',
+    'paid_volunteer',
+    'social_media_volunteer',
+    'community_leader',
+    'women_volunteer',
+    'youth_volunteer',
+    'temporary_volunteer',
+]
+
+_ACTIVITY_DASHBOARD_ROLES = [
+    'district_head',
+    'constituency_mgr',
+    'analyst',
+    'observer',
+]
+
+_TASK_DASHBOARD_ROLES = [
+    'volunteer',
+    'district_head',
+    'constituency_mgr',
+    'party_worker',
+    'paid_volunteer',
+]
+
 ROLE_PERMISSIONS = [
     # ── admin: full access to everything ────────────────────────────────────
     *[('admin', s[1], True, True, True, True) for s in USER_SCREENS],
+
+    # ── Dashboard pages ─────────────────────────────────────────────────────
+    *[(role, 'dashboard-home', True, False, False, False) for role in _DASHBOARD_HOME_ROLES],
+    *[(role, 'activity-dashboard', True, False, False, False) for role in _ACTIVITY_DASHBOARD_ROLES],
+    *[(role, 'task-dashboard', True, False, False, False) for role in _TASK_DASHBOARD_ROLES],
 
     # ── volunteer: entry data with limited CRUD ──────────────────────────────
     # Geographic masters — view-only (needed for dropdown lookups in forms)
@@ -305,12 +349,11 @@ ROLE_PERMISSIONS = [
 ]
 
 
-def seed_screen_permissions():
+def ensure_screen_catalog():
     """
-    Idempotently create MainScreen, UserScreen, and UserScreenPermission records.
+    Idempotently create MainScreen and UserScreen records.
     Safe to run multiple times — uses get_or_create throughout.
     """
-    # 1. Main screens
     ms_map = {}
     for ms in MAIN_SCREENS:
         obj, _ = MainScreen.objects.get_or_create(
@@ -319,7 +362,6 @@ def seed_screen_permissions():
         )
         ms_map[ms['slug']] = obj
 
-    # 2. User screens
     us_map = {}
     for (ms_slug, us_slug, name, icon, order) in USER_SCREENS:
         ms = ms_map[ms_slug]
@@ -329,21 +371,42 @@ def seed_screen_permissions():
         )
         us_map[us_slug] = obj
 
-    # 3. Role permissions
+    return ms_map, us_map
+
+
+def seed_screen_permissions(overwrite_existing=True):
+    """
+    Idempotently create MainScreen, UserScreen, and UserScreenPermission records.
+    When overwrite_existing is False, only missing permission rows are backfilled.
+    """
+    _, us_map = ensure_screen_catalog()
+
     for (role, us_slug, can_view, can_add, can_edit, can_delete) in ROLE_PERMISSIONS:
         us = us_map.get(us_slug)
         if not us:
             continue
-        UserScreenPermission.objects.update_or_create(
-            role=role,
-            user_screen=us,
-            defaults={
-                'can_view':   can_view,
-                'can_add':    can_add,
-                'can_edit':   can_edit,
-                'can_delete': can_delete,
-            },
-        )
+        if overwrite_existing:
+            UserScreenPermission.objects.update_or_create(
+                role=role,
+                user_screen=us,
+                defaults={
+                    'can_view':   can_view,
+                    'can_add':    can_add,
+                    'can_edit':   can_edit,
+                    'can_delete': can_delete,
+                },
+            )
+        else:
+            UserScreenPermission.objects.get_or_create(
+                role=role,
+                user_screen=us,
+                defaults={
+                    'can_view':   can_view,
+                    'can_add':    can_add,
+                    'can_edit':   can_edit,
+                    'can_delete': can_delete,
+                },
+            )
 
 
 class Command(BaseCommand):

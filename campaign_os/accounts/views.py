@@ -7,8 +7,8 @@ from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from campaign_os.core.permissions import (
     ScreenPermission,
-    get_user_permission_roles,
     merge_screen_permissions,
+    resolve_user_permission_roles,
 )
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -17,6 +17,10 @@ from django.db.models import Count, Q
 from campaign_os.accounts.models import (
     User, Role, UserLog, PagePermission,
     MainScreen, UserScreen, UserScreenPermission,
+)
+from campaign_os.accounts.management.commands.seed_screens import (
+    ensure_screen_catalog,
+    seed_screen_permissions,
 )
 from campaign_os.accounts.serializers import (
     UserDetailSerializer, UserCreateUpdateSerializer, UserSimpleSerializer,
@@ -27,6 +31,14 @@ from campaign_os.accounts.serializers import (
 
 
 PERMISSION_MENU_LAYOUT = {
+    'dashboard': [
+        {
+            'slug': 'dashboards',
+            'name': 'Dashboards',
+            'icon': 'ph ph-gauge',
+            'screens': ['dashboard-home', 'activity-dashboard', 'task-dashboard'],
+        },
+    ],
     'entry': [
         {
             'slug': 'field-data',
@@ -370,7 +382,9 @@ class PagePermissionViewSet(viewsets.ModelViewSet):
           }
         }
         """
-        roles = get_user_permission_roles(request.user)
+        seed_screen_permissions(overwrite_existing=False)
+
+        roles = resolve_user_permission_roles(request.user)
         primary_role = roles[0] if roles else request.user.role
 
         perms = (
@@ -392,9 +406,12 @@ class MainScreenViewSet(viewsets.ReadOnlyModelViewSet):
     List all main screens with their child user screens.
     GET /api/v1/auth/main-screens/
     """
-    queryset = MainScreen.objects.filter(is_active=True).prefetch_related('screens')
     serializer_class = MainScreenSerializer
     permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        ensure_screen_catalog()
+        return MainScreen.objects.filter(is_active=True).prefetch_related('screens')
 
 
 class UserScreenViewSet(viewsets.ReadOnlyModelViewSet):
@@ -440,6 +457,9 @@ class UserScreenPermissionViewSet(viewsets.ModelViewSet):
         return qs
 
     def _build_matrix_rows(self, role, main_screen_slug=None):
+        ensure_screen_catalog()
+        seed_screen_permissions(overwrite_existing=False)
+
         existing = {
             perm.user_screen_id: perm
             for perm in (
@@ -503,7 +523,6 @@ class UserScreenPermissionViewSet(viewsets.ModelViewSet):
         """Seed default screen permissions (admin only)"""
         if request.user.role != 'admin':
             return Response({'detail': 'Admin only'}, status=status.HTTP_403_FORBIDDEN)
-        from campaign_os.accounts.management.commands.seed_screens import seed_screen_permissions
         seed_screen_permissions()
         return Response({'detail': 'Screen permissions seeded'})
 
@@ -565,6 +584,8 @@ class UserScreenPermissionViewSet(viewsets.ModelViewSet):
         Metadata for the user-permission builder UI.
         """
         from campaign_os.masters.models import VolunteerRole
+
+        ensure_screen_catalog()
 
         volunteer_roles = (
             VolunteerRole.objects

@@ -84,6 +84,52 @@ def get_user_permission_roles(user):
     return candidates
 
 
+def _role_has_screen_permissions(role, screen_slug=None):
+    role_key = (role or '').strip()
+    if not role_key:
+        return False
+
+    from campaign_os.accounts.models import UserScreenPermission
+
+    queryset = UserScreenPermission.objects.filter(role=role_key)
+    if screen_slug:
+        queryset = queryset.filter(user_screen__slug=screen_slug)
+    return queryset.exists()
+
+
+def resolve_user_permission_roles(user, screen_slug=None):
+    """
+    Resolve the effective permission role(s) for the user.
+
+    Volunteer users may have multiple candidate keys (VolunteerRole name,
+    volunteer profile role, volunteer_type, generic volunteer). We only want
+    one permission source at a time:
+      1. first specific volunteer role that has matching permission rows
+      2. generic "volunteer" fallback
+
+    This keeps user-type-specific permissions from being widened by the
+    generic volunteer role.
+    """
+    candidates = get_user_permission_roles(user)
+    if not candidates:
+        return []
+
+    role = (getattr(user, 'role', '') or '').strip()
+    if role != 'volunteer':
+        return [candidates[0]]
+
+    specific_candidates = [candidate for candidate in candidates if candidate != 'volunteer']
+
+    for candidate in specific_candidates:
+        if _role_has_screen_permissions(candidate, screen_slug=screen_slug):
+            return [candidate]
+
+    if _role_has_screen_permissions('volunteer', screen_slug=screen_slug) or 'volunteer' in candidates:
+        return ['volunteer']
+
+    return []
+
+
 def merge_screen_permissions(permission_rows):
     """
     Merge permission rows into the frontend response shape.
@@ -137,11 +183,11 @@ class ScreenPermission(BasePermission):
         action = getattr(view, 'action', None)
         flag = ACTION_TO_FLAG.get(action, 'can_view')
 
-        roles = get_user_permission_roles(request.user)
+        roles = resolve_user_permission_roles(request.user, screen_slug=screen_slug)
         if not roles:
             return False
 
-        # Look up permission rows across all effective roles
+        # Look up permission rows for the resolved effective role
         from campaign_os.accounts.models import UserScreenPermission
         permissions_qs = UserScreenPermission.objects.filter(
             role__in=roles,
