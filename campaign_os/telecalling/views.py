@@ -313,17 +313,11 @@ class TelecallingAssignmentViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='survey-voters')
     def survey_voters(self, request):
-        assignments = list(self.get_queryset())
+        scoped_assignments = list(self.get_queryset())
         assignment_time = (request.query_params.get('assignment_time') or '').strip()
-        if assignment_time:
-            assignments = [
-                assignment for assignment in assignments
-                if assignment.created_at and _assignment_time_value(assignment) == assignment_time
-            ]
 
         assignment_time_counts = {}
-        flat_rows = []
-        for assignment in assignments:
+        for assignment in scoped_assignments:
             time_value = _assignment_time_value(assignment)
             if time_value:
                 bucket = assignment_time_counts.setdefault(time_value, {
@@ -331,6 +325,16 @@ class TelecallingAssignmentViewSet(viewsets.ModelViewSet):
                     'label': _assignment_time_label(assignment),
                 })
                 bucket['count'] += len(assignment.voters.all())
+
+        assignments = scoped_assignments
+        if assignment_time:
+            assignments = [
+                assignment for assignment in scoped_assignments
+                if assignment.created_at and _assignment_time_value(assignment) == assignment_time
+            ]
+
+        flat_rows = []
+        for assignment in assignments:
             for voter in assignment.voters.all():
                 flat_rows.append({
                     'assignment_id': assignment.id,
