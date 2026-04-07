@@ -141,6 +141,40 @@ def _build_telecaller_lookup_for_surveys(surveys):
     return by_voter, by_name
 
 
+def _build_assignment_detail_lookup_for_surveys(surveys):
+    voter_ids = {survey.voter_id for survey in surveys if survey.voter_id}
+    voter_names = {survey.voter_name.strip().lower() for survey in surveys if survey.voter_name}
+
+    assignment_rows = (
+        TelecallingAssignmentVoter.objects
+        .filter(
+            Q(voter_id__in=voter_ids) |
+            Q(voter_name__in=[name for name in voter_names if name])
+        )
+        .order_by('-assignment__assigned_date', '-assignment__created_at', '-assignment_id', '-id')
+    )
+
+    by_voter = {}
+    by_name = {}
+    for row in assignment_rows:
+        info = {
+            'voter_id_no': row.voter_id_no or '',
+            'booth_name': row.booth_name or '',
+            'phone': row.phone or '',
+            'address': row.address or '',
+            'age': row.age,
+            'gender': row.gender or '',
+        }
+        if row.voter_id and row.voter_id not in by_voter:
+            by_voter[row.voter_id] = info
+        if row.voter_name:
+            normalized_name = row.voter_name.strip().lower()
+            if normalized_name and normalized_name not in by_name:
+                by_name[normalized_name] = info
+
+    return by_voter, by_name
+
+
 def _survey_location_maps(surveys):
     booth_numbers = {survey.booth_no.strip() for survey in surveys if survey.booth_no}
     booth_map = {}
@@ -530,7 +564,12 @@ class TelecallingFeedbackViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='review-list')
     def review_list(self, request):
-        global_surveys = list(FieldSurvey.objects.filter(is_active=True).order_by('-survey_date', '-created_at', '-id'))
+        global_surveys = list(
+            FieldSurvey.objects
+            .filter(is_active=True)
+            .select_related('voter__booth')
+            .order_by('-survey_date', '-created_at', '-id')
+        )
         global_feedbacks = list(
             TelecallingFeedback.objects
             .filter(is_active=True, survey__isnull=False)
@@ -605,6 +644,7 @@ class TelecallingFeedbackViewSet(viewsets.ModelViewSet):
             surveys = [survey for survey in surveys if (booth_map.get(survey.booth_no or '', {}).get('union') or '') == union]
 
         telecaller_by_voter, telecaller_by_name = _build_telecaller_lookup_for_surveys(surveys)
+        detail_by_voter, detail_by_name = _build_assignment_detail_lookup_for_surveys(surveys)
 
         telecaller_filter = (request.query_params.get('telecaller') or '').strip()
         if telecaller_filter:
@@ -670,15 +710,23 @@ class TelecallingFeedbackViewSet(viewsets.ModelViewSet):
 
         results = []
         for survey in surveys:
+            voter_obj = getattr(survey, 'voter', None)
+            booth_obj = getattr(voter_obj, 'booth', None) if voter_obj else None
             telecaller = (telecaller_by_voter.get(survey.voter_id) if survey.voter_id else None) or telecaller_by_name.get((survey.voter_name or '').strip().lower()) or {}
+            assignment_details = (detail_by_voter.get(survey.voter_id) if survey.voter_id else None) or detail_by_name.get((survey.voter_name or '').strip().lower()) or {}
             decision = latest_feedback_by_survey.get(survey.id)
             results.append({
                 'id': survey.id,
                 'voter_name': survey.voter_name or '',
-                'phone': survey.phone or '',
+                'voter_id_no': getattr(voter_obj, 'voter_id', '') or assignment_details.get('voter_id_no', ''),
+                'phone': survey.phone or getattr(voter_obj, 'phone', '') or assignment_details.get('phone', ''),
                 'booth_no': survey.booth_no or '',
+                'booth_name': getattr(booth_obj, 'name', '') or assignment_details.get('booth_name', ''),
                 'block': survey.block or '',
                 'village': survey.village or '',
+                'age': survey.age if survey.age is not None else getattr(voter_obj, 'age', None) or assignment_details.get('age'),
+                'gender': survey.gender or getattr(voter_obj, 'gender', '') or assignment_details.get('gender', ''),
+                'address': survey.address or getattr(voter_obj, 'address', '') or assignment_details.get('address', ''),
                 'support_level': survey.support_level or '',
                 'party_preference': survey.party_preference or '',
                 'response_status': survey.response_status or '',

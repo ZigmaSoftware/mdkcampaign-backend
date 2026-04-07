@@ -83,6 +83,8 @@ def dashboard_summary(request):
                 'filters': {},
                 'kpis': {},
                 'support_breakdown': [],
+                'gender_breakdown': [],
+                'age_breakdown': [],
                 'awareness_breakdown': [],
                 'vote_likelihood_breakdown': [],
                 'response_breakdown': [],

@@ -8,11 +8,102 @@ from campaign_os.dashboard.services.aggregation_service import (
     safe_pct,
     telecaller_efficiency_score,
 )
+from campaign_os.voters.models import Voter
+
+
+GENDER_BUCKETS = (
+    ('male', 'Male', Q(gender__in=['m', 'Male'])),
+    ('female', 'Female', Q(gender__in=['f', 'Female'])),
+    ('other', 'Others', Q(gender__in=['o', 'Other'])),
+)
+
+AGE_BUCKETS = (
+    ('18_23', '18-23', Q(age__gte=18, age__lte=23)),
+    ('23_30', '23-30', Q(age__gt=23, age__lte=30)),
+    ('30_40', '30-40', Q(age__gt=30, age__lte=40)),
+    ('40_50', '40-50', Q(age__gt=40, age__lte=50)),
+    ('50_60', '50-60', Q(age__gt=50, age__lte=60)),
+    ('60_70', '60-70', Q(age__gt=60, age__lte=70)),
+    ('70_80', '70-80', Q(age__gt=70, age__lte=80)),
+    ('80_90', '80-90', Q(age__gt=80, age__lte=90)),
+    ('90_plus', '90+', Q(age__gt=90)),
+)
 
 
 class DashboardService:
     def __init__(self):
         self.repo = DataRepository()
+
+    def _build_survey_aggregate_map(self) -> dict:
+        aggregate_map = {
+            'total_records': Count('id'),
+            'linked_voters': Count('voter', distinct=True),
+            'unlinked_records': Count('id', filter=Q(voter__isnull=True)),
+            'positive': Count('id', filter=Q(support_level='positive')),
+            'negative': Count('id', filter=Q(support_level='negative')),
+            'neutral': Count('id', filter=Q(support_level='neutral')),
+            'aware_yes': Count('id', filter=Q(aware_of_candidate='Yes')),
+            'aware_no': Count('id', filter=Q(aware_of_candidate='No')),
+            'aware_not_sure': Count('id', filter=Q(aware_of_candidate='Not Sure')),
+            'vote_yes': Count('id', filter=Q(likely_to_vote='Yes')),
+            'vote_no': Count('id', filter=Q(likely_to_vote='No')),
+            'vote_not_sure': Count('id', filter=Q(likely_to_vote='Not Sure')),
+            'not_reach': Count('id', filter=Q(response_status='not_reach')),
+            'no_answer': Count('id', filter=Q(response_status='no_answer')),
+            'wrong_number': Count('id', filter=Q(response_status='wrong_number')),
+        }
+
+        for key, _label, gender_q in GENDER_BUCKETS:
+            aggregate_map[f'gender_{key}'] = Count('id', filter=gender_q)
+            aggregate_map[f'gender_{key}_positive'] = Count('id', filter=gender_q & Q(support_level='positive'))
+            aggregate_map[f'gender_{key}_neutral'] = Count('id', filter=gender_q & Q(support_level='neutral'))
+            aggregate_map[f'gender_{key}_negative'] = Count('id', filter=gender_q & Q(support_level='negative'))
+
+        for key, _label, age_q in AGE_BUCKETS:
+            aggregate_map[f'age_{key}'] = Count('id', filter=age_q)
+            aggregate_map[f'age_{key}_positive'] = Count('id', filter=age_q & Q(support_level='positive'))
+            aggregate_map[f'age_{key}_neutral'] = Count('id', filter=age_q & Q(support_level='neutral'))
+            aggregate_map[f'age_{key}_negative'] = Count('id', filter=age_q & Q(support_level='negative'))
+
+        return aggregate_map
+
+    def _get_overall_gender_totals(self, filters: DashboardFilters) -> dict[str, int]:
+        if filters.has_telecaller_scope:
+            queryset = self.repo.get_assignment_voter_queryset(filters).exclude(voter_id__isnull=True)
+            totals = queryset.aggregate(
+                male=Count('voter', filter=Q(voter__gender__in=['m', 'Male']), distinct=True),
+                female=Count('voter', filter=Q(voter__gender__in=['f', 'Female']), distinct=True),
+                other=Count('voter', filter=Q(voter__gender__in=['o', 'Other']), distinct=True),
+            )
+            return {
+                'male': totals.get('male') or 0,
+                'female': totals.get('female') or 0,
+                'other': totals.get('other') or 0,
+            }
+
+        queryset = Voter.objects.filter(is_active=True).select_related('booth')
+        queryset = self.repo._apply_booth_scope(queryset, 'booth__', filters)
+
+        if filters.booth_id:
+            queryset = queryset.filter(booth_id=filters.booth_id)
+        elif filters.booth:
+            booth_value = filters.booth.strip()
+            queryset = queryset.filter(
+                Q(booth__number__iexact=booth_value)
+                | Q(booth__code__iexact=booth_value)
+                | Q(booth__name__iexact=booth_value)
+            )
+
+        totals = queryset.aggregate(
+            male=Count('id', filter=Q(gender__in=['m', 'Male'])),
+            female=Count('id', filter=Q(gender__in=['f', 'Female'])),
+            other=Count('id', filter=Q(gender__in=['o', 'Other'])),
+        )
+        return {
+            'male': totals.get('male') or 0,
+            'female': totals.get('female') or 0,
+            'other': totals.get('other') or 0,
+        }
 
     def build_filters(self, validated_data: dict) -> DashboardFilters:
         filters = DashboardFilters(
@@ -32,24 +123,8 @@ class DashboardService:
         surveys = self.repo.get_survey_queryset(filters)
         feedbacks = self.repo.get_feedback_queryset(filters)
         assignment_scope_total = self.repo.get_assignment_scope_voter_count(filters)
-
-        survey_totals = surveys.aggregate(
-            total_records=Count('id'),
-            linked_voters=Count('voter', distinct=True),
-            unlinked_records=Count('id', filter=Q(voter__isnull=True)),
-            positive=Count('id', filter=Q(support_level='positive')),
-            negative=Count('id', filter=Q(support_level='negative')),
-            neutral=Count('id', filter=Q(support_level='neutral')),
-            aware_yes=Count('id', filter=Q(aware_of_candidate='Yes')),
-            aware_no=Count('id', filter=Q(aware_of_candidate='No')),
-            aware_not_sure=Count('id', filter=Q(aware_of_candidate='Not Sure')),
-            vote_yes=Count('id', filter=Q(likely_to_vote='Yes')),
-            vote_no=Count('id', filter=Q(likely_to_vote='No')),
-            vote_not_sure=Count('id', filter=Q(likely_to_vote='Not Sure')),
-            not_reach=Count('id', filter=Q(response_status='not_reach')),
-            no_answer=Count('id', filter=Q(response_status='no_answer')),
-            wrong_number=Count('id', filter=Q(response_status='wrong_number')),
-        )
+        survey_totals = surveys.aggregate(**self._build_survey_aggregate_map())
+        overall_gender_totals = self._get_overall_gender_totals(filters)
 
         surveyed_voters = (survey_totals['linked_voters'] or 0) + (survey_totals['unlinked_records'] or 0)
         feedback_decision_ids = set(
@@ -91,6 +166,32 @@ class DashboardService:
             .order_by('-count', 'party_preference')[:8]
         )
 
+        gender_breakdown = []
+        for key, label, _gender_q in GENDER_BUCKETS:
+            count = survey_totals.get(f'gender_{key}') or 0
+            overall_count = overall_gender_totals.get(key) or 0
+            gender_breakdown.append({
+                'key': key,
+                'label': label,
+                'count': count,
+                'overall_count': overall_count,
+                'positive_count': survey_totals.get(f'gender_{key}_positive') or 0,
+                'neutral_count': survey_totals.get(f'gender_{key}_neutral') or 0,
+                'negative_count': survey_totals.get(f'gender_{key}_negative') or 0,
+                'pct': safe_pct(count, overall_count),
+            })
+
+        age_breakdown = []
+        for key, label, _age_q in AGE_BUCKETS:
+            age_breakdown.append({
+                'key': key,
+                'label': label,
+                'count': survey_totals.get(f'age_{key}') or 0,
+                'positive_count': survey_totals.get(f'age_{key}_positive') or 0,
+                'neutral_count': survey_totals.get(f'age_{key}_neutral') or 0,
+                'negative_count': survey_totals.get(f'age_{key}_negative') or 0,
+            })
+
         telecaller_count = len(self.get_telecaller_efficiency(validated_data)['rows'])
 
         return {
@@ -122,6 +223,8 @@ class DashboardService:
                 {'key': 'neutral', 'label': 'Neutral', 'count': survey_totals['neutral'] or 0},
                 {'key': 'negative', 'label': 'Negative', 'count': survey_totals['negative'] or 0},
             ],
+            'gender_breakdown': gender_breakdown,
+            'age_breakdown': age_breakdown,
             'awareness_breakdown': [
                 {'key': 'yes', 'label': 'Aware', 'count': survey_totals['aware_yes'] or 0},
                 {'key': 'no', 'label': 'Not Aware', 'count': survey_totals['aware_no'] or 0},
