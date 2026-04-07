@@ -24,6 +24,12 @@ def _assignment_time_value(assignment):
     return timezone.localtime(assignment.created_at).strftime('%H:%M:%S')
 
 
+def _assignment_time_label(assignment):
+    if not assignment.created_at:
+        return ''
+    return timezone.localtime(assignment.created_at).strftime('%Y-%m-%d %H:%M:%S')
+
+
 def _serialize_field_survey_record(survey):
     if not survey:
         return None
@@ -320,7 +326,11 @@ class TelecallingAssignmentViewSet(viewsets.ModelViewSet):
         for assignment in assignments:
             time_value = _assignment_time_value(assignment)
             if time_value:
-                assignment_time_counts[time_value] = assignment_time_counts.get(time_value, 0) + len(assignment.voters.all())
+                bucket = assignment_time_counts.setdefault(time_value, {
+                    'count': 0,
+                    'label': _assignment_time_label(assignment),
+                })
+                bucket['count'] += len(assignment.voters.all())
             for voter in assignment.voters.all():
                 flat_rows.append({
                     'assignment_id': assignment.id,
@@ -488,10 +498,10 @@ class TelecallingAssignmentViewSet(viewsets.ModelViewSet):
         response.data['assignment_times'] = [
             {
                 'value': value,
-                'label': f"{value} / {count} {'voter' if count == 1 else 'voters'}",
-                'count': count,
+                'label': f"{meta['label'] or value} / {meta['count']} {'voter' if meta['count'] == 1 else 'voters'}",
+                'count': meta['count'],
             }
-            for value, count in sorted(assignment_time_counts.items(), key=lambda item: item[0])
+            for value, meta in sorted(assignment_time_counts.items(), key=lambda item: item[0])
         ]
         return response
 
