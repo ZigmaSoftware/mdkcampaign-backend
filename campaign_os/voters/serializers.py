@@ -33,6 +33,8 @@ class VoterSerializer(serializers.ModelSerializer):
     workflow_status = serializers.SerializerMethodField()
     workflow_label  = serializers.SerializerMethodField()
     is_locked       = serializers.SerializerMethodField()
+    assigned_telecaller_name = serializers.SerializerMethodField()
+    assigned_telecaller_phone = serializers.SerializerMethodField()
 
     def get_party_name(self, obj):
         return obj.preferred_party.name if obj.preferred_party_id else ''
@@ -49,6 +51,12 @@ class VoterSerializer(serializers.ModelSerializer):
     def get_is_locked(self, obj):
         return self._workflow(obj).get('is_locked', False)
 
+    def get_assigned_telecaller_name(self, obj):
+        return self._workflow(obj).get('telecaller_name', '')
+
+    def get_assigned_telecaller_phone(self, obj):
+        return self._workflow(obj).get('telecaller_phone', '')
+
     class Meta:
         model = Voter
         fields = [
@@ -60,6 +68,7 @@ class VoterSerializer(serializers.ModelSerializer):
             'party_name', 'is_contacted', 'last_contacted_at', 'contact_count',
             'has_attended_event', 'is_volunteer', 'feedback_score', 'notes',
             'workflow_status', 'workflow_label', 'is_locked',
+            'assigned_telecaller_name', 'assigned_telecaller_phone',
             'created_at', 'updated_at'
         ]
 

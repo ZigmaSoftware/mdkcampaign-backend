@@ -153,6 +153,26 @@ def _survey_location_maps(surveys):
     return booth_map
 
 
+def _booth_location_map_for_numbers(booth_numbers):
+    cleaned = {str(number).strip() for number in booth_numbers if str(number or '').strip()}
+    booth_map = {}
+    if not cleaned:
+        return booth_map
+
+    booths = (
+        Booth.objects
+        .filter(is_active=True, number__in=cleaned)
+        .select_related('panchayat__union__block')
+    )
+    for booth in booths:
+        booth_map[booth.number] = {
+            'panchayat': getattr(booth.panchayat, 'name', '') if booth.panchayat_id else '',
+            'union': getattr(getattr(booth.panchayat, 'union', None), 'name', '') if booth.panchayat_id else '',
+            'block': getattr(getattr(getattr(booth.panchayat, 'union', None), 'block', None), 'name', '') if booth.panchayat_id else '',
+        }
+    return booth_map
+
+
 class TelecallingAssignmentViewSet(viewsets.ModelViewSet):
     screen_slug = 'assign-telecalling'
     view_permission_screen_slugs = ('telecalling-assigned', 'voter-survey', 'feedback-review', 'activity-report')
@@ -336,6 +356,22 @@ class TelecallingAssignmentViewSet(viewsets.ModelViewSet):
             'pending': sum(1 for row in base_rows if not row['survey_record']),
             'done': sum(1 for row in base_rows if row['survey_record']),
         }
+        booth_location_map = _booth_location_map_for_numbers(
+            [
+                (row.get('survey_record') or {}).get('booth_no') or row.get('booth_no') or ''
+                for row in base_rows
+            ]
+        )
+
+        def survey_record_for(row):
+            return row.get('survey_record') or {}
+
+        def row_booth_no(row):
+            return (survey_record_for(row).get('booth_no') or row.get('booth_no') or '').strip()
+
+        def row_location(row):
+            return booth_location_map.get(row_booth_no(row), {})
+
         base_rows.sort(
             key=lambda row: (
                 1 if not (row.get('address') or '').strip() else 0,
@@ -353,6 +389,82 @@ class TelecallingAssignmentViewSet(viewsets.ModelViewSet):
                 or search in (row['voter_id_no'] or '').lower()
                 or search in (row['phone'] or '')
                 or search in (row['address'] or '').lower()
+            ]
+
+        support_level = (request.query_params.get('support_level') or '').strip()
+        if support_level:
+            filtered_rows = [
+                row for row in filtered_rows
+                if (survey_record_for(row).get('support_level') or '') == support_level
+            ]
+
+        response_status = (request.query_params.get('response_status') or '').strip()
+        if response_status:
+            filtered_rows = [
+                row for row in filtered_rows
+                if (survey_record_for(row).get('response_status') or '') == response_status
+            ]
+
+        aware_of_candidate = (request.query_params.get('aware_of_candidate') or '').strip()
+        if aware_of_candidate:
+            filtered_rows = [
+                row for row in filtered_rows
+                if (survey_record_for(row).get('aware_of_candidate') or '') == aware_of_candidate
+            ]
+
+        likely_to_vote = (request.query_params.get('likely_to_vote') or '').strip()
+        if likely_to_vote:
+            filtered_rows = [
+                row for row in filtered_rows
+                if (survey_record_for(row).get('likely_to_vote') or '') == likely_to_vote
+            ]
+
+        party = (request.query_params.get('party') or '').strip()
+        if party:
+            filtered_rows = [
+                row for row in filtered_rows
+                if (survey_record_for(row).get('party_preference') or '') == party
+            ]
+
+        block = (request.query_params.get('block') or '').strip()
+        if block:
+            filtered_rows = [
+                row for row in filtered_rows
+                if ((survey_record_for(row).get('block') or row_location(row).get('block') or '') == block)
+            ]
+
+        booth = (request.query_params.get('booth') or '').strip()
+        if booth:
+            filtered_rows = [row for row in filtered_rows if row_booth_no(row) == booth]
+
+        date_from = (request.query_params.get('date_from') or '').strip()
+        if date_from:
+            filtered_rows = [
+                row for row in filtered_rows
+                if (survey_record_for(row).get('survey_date') or '')
+                and str(survey_record_for(row).get('survey_date') or '') >= date_from
+            ]
+
+        date_to = (request.query_params.get('date_to') or '').strip()
+        if date_to:
+            filtered_rows = [
+                row for row in filtered_rows
+                if (survey_record_for(row).get('survey_date') or '')
+                and str(survey_record_for(row).get('survey_date') or '') <= date_to
+            ]
+
+        panchayat = (request.query_params.get('panchayat') or '').strip()
+        if panchayat:
+            filtered_rows = [
+                row for row in filtered_rows
+                if (row_location(row).get('panchayat') or '') == panchayat
+            ]
+
+        union = (request.query_params.get('union') or '').strip()
+        if union:
+            filtered_rows = [
+                row for row in filtered_rows
+                if (row_location(row).get('union') or '') == union
             ]
 
         filtered_counts = {

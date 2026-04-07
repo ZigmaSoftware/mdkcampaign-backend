@@ -14,6 +14,7 @@ from campaign_os.volunteers.models import Volunteer
 from campaign_os.beneficiaries.models import Beneficiary
 from campaign_os.campaigns.models import CampaignEvent
 from campaign_os.activities.models import FieldSurvey
+from campaign_os.telecalling.models import TelecallingAssignmentVoter
 from rest_framework import status as drf_status
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,12 @@ def _norm_voter_id(value):
     if not value:
         return ''
     return str(value).strip().upper()
+
+
+def _normalize_text(value):
+    if not value:
+        return ''
+    return ' '.join(str(value).strip().lower().split())
 
 
 class DashboardSnapshotSerializer(serializers.ModelSerializer):
@@ -357,6 +364,151 @@ class AnalyticsViewSet(viewsets.ViewSet):
             })
 
         return Response(voters)
+
+    @action(detail=False, methods=['GET'], url_path=r'booth-telecaller-breakup/(?P<booth_id>\d+)')
+    def booth_telecaller_breakup(self, request, booth_id=None):
+        """Return the current telecaller-wise assignment and survey breakup for one booth."""
+        booth = (
+            Booth.objects.filter(is_active=True, id=booth_id)
+            .only('id', 'name', 'number', 'code', 'total_voters')
+            .first()
+        )
+        if not booth:
+            return Response({
+                'booth_id': int(booth_id) if booth_id else None,
+                'booth_name': '',
+                'booth_number': '',
+                'booth_total_voters': 0,
+                'assigned_total': 0,
+                'surveyed_total': 0,
+                'rows': [],
+            })
+
+        booth_labels = {
+            value.strip()
+            for value in (booth.name or '', booth.number or '', getattr(booth, 'code', '') or '')
+            if value and value.strip()
+        }
+
+        booth_assignment_q = Q(voter__booth_id=booth.id)
+        for label in booth_labels:
+            booth_assignment_q |= Q(booth_name__iexact=label)
+
+        assignment_rows = list(
+            TelecallingAssignmentVoter.objects
+            .filter(assignment__is_active=True)
+            .filter(booth_assignment_q)
+            .select_related('assignment', 'voter')
+            .order_by('-assignment__assigned_date', '-assignment__created_at', '-assignment_id', '-id')
+        )
+
+        def assignment_keys(row):
+            if row.voter_id:
+                return [f'id:{row.voter_id}']
+
+            name_key = _normalize_text(row.voter_name)
+            if not name_key:
+                return [f'row:{row.id}']
+
+            phone = (row.phone or '').strip()
+            keys = []
+            if phone:
+                keys.append(f'{name_key}::{phone}')
+            keys.append(name_key)
+            return keys
+
+        latest_assignment_by_voter = {}
+        for row in assignment_rows:
+            key = assignment_keys(row)[0]
+            if key not in latest_assignment_by_voter:
+                latest_assignment_by_voter[key] = row
+
+        active_assignment_rows = list(latest_assignment_by_voter.values())
+        linked_voter_ids = {row.voter_id for row in active_assignment_rows if row.voter_id}
+        loose_names = {row.voter_name.strip() for row in active_assignment_rows if row.voter_name and not row.voter_id}
+
+        survey_lookup = {}
+        if linked_voter_ids or loose_names:
+            survey_filter = Q()
+            if linked_voter_ids:
+                survey_filter |= Q(voter_id__in=linked_voter_ids)
+            if loose_names:
+                survey_filter |= Q(voter__isnull=True, voter_name__in=list(loose_names))
+
+            surveys = (
+                FieldSurvey.objects.filter(is_active=True)
+                .filter(survey_filter)
+                .order_by('-survey_date', '-created_at', '-id')
+            )
+            for survey in surveys:
+                keys = []
+                if survey.voter_id:
+                    keys.append(f'id:{survey.voter_id}')
+                else:
+                    name_key = _normalize_text(survey.voter_name)
+                    if name_key:
+                        phone = (survey.phone or '').strip()
+                        if phone:
+                            keys.append(f'{name_key}::{phone}')
+                        keys.append(name_key)
+
+                for key in keys:
+                    if key and key not in survey_lookup:
+                        survey_lookup[key] = survey.id
+
+        telecaller_metrics = {}
+        for row in active_assignment_rows:
+            telecaller_key = (
+                f"id:{row.assignment.telecaller_id}"
+                if row.assignment.telecaller_id
+                else _normalize_text(row.assignment.telecaller_name) or f'assignment:{row.assignment_id}'
+            )
+            if telecaller_key not in telecaller_metrics:
+                telecaller_metrics[telecaller_key] = {
+                    'telecaller_id': row.assignment.telecaller_id,
+                    'telecaller_name': row.assignment.telecaller_name or 'Unassigned',
+                    'telecaller_phone': row.assignment.telecaller_phone or '',
+                    'assigned_voters': 0,
+                    'surveyed_voters': 0,
+                }
+
+            item = telecaller_metrics[telecaller_key]
+            item['assigned_voters'] += 1
+            if any(key in survey_lookup for key in assignment_keys(row)):
+                item['surveyed_voters'] += 1
+
+        rows = []
+        for item in telecaller_metrics.values():
+            assigned_voters = item['assigned_voters']
+            surveyed_voters = item['surveyed_voters']
+            item['pending_voters'] = max(assigned_voters - surveyed_voters, 0)
+            item['survey_completion_pct'] = round((surveyed_voters * 100 / assigned_voters), 1) if assigned_voters else 0
+            rows.append(item)
+
+        rows.sort(
+            key=lambda row: (
+                row['assigned_voters'],
+                row['surveyed_voters'],
+                row['telecaller_name'].lower(),
+            ),
+            reverse=True,
+        )
+
+        booth_total_voters = (
+            Voter.objects.filter(is_active=True, booth_id=booth.id).count()
+            or booth.total_voters
+            or 0
+        )
+
+        return Response({
+            'booth_id': booth.id,
+            'booth_name': booth.name or '',
+            'booth_number': booth.number or '',
+            'booth_total_voters': booth_total_voters,
+            'assigned_total': sum(row['assigned_voters'] for row in rows),
+            'surveyed_total': sum(row['surveyed_voters'] for row in rows),
+            'rows': rows,
+        })
     
     @action(detail=False, methods=['GET'])
     def constituency_stats(self, request):

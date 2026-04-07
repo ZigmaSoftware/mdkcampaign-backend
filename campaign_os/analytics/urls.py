@@ -9,6 +9,7 @@ urlpatterns = [
     path('booths/', AnalyticsViewSet.as_view({'get': 'booth_statistics'}), name='booth-stats'),
     path('booth-volunteers/<int:booth_id>/', AnalyticsViewSet.as_view({'get': 'booth_volunteers'}), name='booth-volunteers'),
     path('booth-voters/<int:booth_id>/', AnalyticsViewSet.as_view({'get': 'booth_voters_list'}), name='booth-voters'),
+    path('booth-telecaller-breakup/<int:booth_id>/', AnalyticsViewSet.as_view({'get': 'booth_telecaller_breakup'}), name='booth-telecaller-breakup'),
     path('constituencies/', AnalyticsViewSet.as_view({'get': 'constituency_stats'}), name='constituency-stats'),
     path('volunteers/', AnalyticsViewSet.as_view({'get': 'volunteer_performance'}), name='volunteer-perf'),
     path('sentiment/', AnalyticsViewSet.as_view({'get': 'sentiment_distribution'}), name='sentiment-dist'),

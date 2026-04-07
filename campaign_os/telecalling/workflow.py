@@ -6,6 +6,7 @@ from .models import TelecallingAssignmentVoter, TelecallingFeedback
 
 
 WORKFLOW_LABELS = {
+    'unassigned': 'Unassigned',
     'assigned': 'Assigned',
     'pending_followup': 'Pending Follow-up',
     'pending_field_survey': 'Pending Field Survey',
@@ -35,10 +36,15 @@ def build_voter_status_map(voter_ids: Iterable[int]) -> Dict[int, dict]:
         .select_related('assignment')
         .order_by('voter_id', '-assignment__created_at', '-assignment_id')
     )
-    latest_assignment: Dict[int, object] = {}
+    latest_assignment: Dict[int, dict] = {}
     for row in assignment_qs:
         if row.voter_id not in latest_assignment:
-            latest_assignment[row.voter_id] = row.assignment.created_at
+            latest_assignment[row.voter_id] = {
+                'created_at': row.assignment.created_at,
+                'telecaller_id': row.assignment.telecaller_id,
+                'telecaller_name': row.assignment.telecaller_name or '',
+                'telecaller_phone': row.assignment.telecaller_phone or '',
+            }
         # Build name → id mapping (lowercase for case-insensitive match)
         if row.voter_name:
             name_to_voter_id[row.voter_name.strip().lower()] = row.voter_id
@@ -80,7 +86,13 @@ def build_voter_status_map(voter_ids: Iterable[int]) -> Dict[int, dict]:
     status_map: Dict[int, dict] = {}
     for voter_id in voter_id_set:
         feedback = latest_feedback.get(voter_id)
-        if not feedback:
+        latest_assignment_info = latest_assignment.get(voter_id, {})
+        has_assignment = bool(latest_assignment_info)
+
+        if not has_assignment:
+            status = 'unassigned'
+            is_locked = False
+        elif not feedback:
             status = 'assigned'
             is_locked = True
         elif feedback.action == 'followup_not_required':
@@ -91,7 +103,7 @@ def build_voter_status_map(voter_ids: Iterable[int]) -> Dict[int, dict]:
             is_locked = True
         else:
             # followup_required + telephonic (or empty type)
-            latest_assignment_ts = latest_assignment.get(voter_id)
+            latest_assignment_ts = latest_assignment_info.get('created_at')
             feedback_ts = feedback.created_at
             if latest_assignment_ts and feedback_ts and latest_assignment_ts > feedback_ts:
                 status = 'reassigned'
@@ -104,6 +116,9 @@ def build_voter_status_map(voter_ids: Iterable[int]) -> Dict[int, dict]:
             'status': status,
             'label': WORKFLOW_LABELS.get(status, status.replace('_', ' ').title()),
             'is_locked': is_locked,
+            'telecaller_id': latest_assignment_info.get('telecaller_id'),
+            'telecaller_name': latest_assignment_info.get('telecaller_name', ''),
+            'telecaller_phone': latest_assignment_info.get('telecaller_phone', ''),
         }
 
     return status_map
