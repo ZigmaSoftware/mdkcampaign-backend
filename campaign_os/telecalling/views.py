@@ -34,6 +34,8 @@ def _serialize_field_survey_record(survey):
     if not survey:
         return None
 
+    voter = getattr(survey, 'voter', None)
+
     return {
         'id': survey.id,
         'voter': survey.voter_id,
@@ -45,6 +47,9 @@ def _serialize_field_survey_record(survey):
         'age': survey.age,
         'gender': survey.gender or '',
         'phone': survey.phone or '',
+        'phone2': getattr(voter, 'phone2', '') or '',
+        'alt_phoneno2': getattr(voter, 'alt_phoneno2', '') or '',
+        'alt_phoneno3': getattr(voter, 'alt_phoneno3', '') or '',
         'address': survey.address or '',
         'is_registered': survey.is_registered or '',
         'aware_of_candidate': survey.aware_of_candidate or '',
@@ -64,7 +69,7 @@ def _build_assignment_survey_lookup(flat_rows):
     voter_ids = {row['voter'] for row in flat_rows if row.get('voter')}
     loose_names = {row['voter_name'].strip() for row in flat_rows if row.get('voter_name')}
 
-    survey_qs = FieldSurvey.objects.filter(is_active=True).order_by('-survey_date', '-created_at', '-id')
+    survey_qs = FieldSurvey.objects.filter(is_active=True).select_related('voter').order_by('-survey_date', '-created_at', '-id')
     if voter_ids or loose_names:
         survey_qs = survey_qs.filter(
             Q(voter_id__in=voter_ids) |
@@ -151,6 +156,7 @@ def _build_assignment_detail_lookup_for_surveys(surveys):
             Q(voter_id__in=voter_ids) |
             Q(voter_name__in=[name for name in voter_names if name])
         )
+        .select_related('assignment', 'voter')
         .order_by('-assignment__assigned_date', '-assignment__created_at', '-assignment_id', '-id')
     )
 
@@ -161,6 +167,9 @@ def _build_assignment_detail_lookup_for_surveys(surveys):
             'voter_id_no': row.voter_id_no or '',
             'booth_name': row.booth_name or '',
             'phone': row.phone or '',
+            'phone2': getattr(getattr(row, 'voter', None), 'phone2', '') or '',
+            'alt_phoneno2': getattr(getattr(row, 'voter', None), 'alt_phoneno2', '') or '',
+            'alt_phoneno3': getattr(getattr(row, 'voter', None), 'alt_phoneno3', '') or '',
             'address': row.address or '',
             'age': row.age,
             'gender': row.gender or '',
@@ -377,6 +386,9 @@ class TelecallingAssignmentViewSet(viewsets.ModelViewSet):
                     'voter_name': voter.voter_name or '',
                     'voter_id_no': voter.voter_id_no or '',
                     'phone': voter.phone or '',
+                    'phone2': getattr(getattr(voter, 'voter', None), 'phone2', '') or '',
+                    'alt_phoneno2': getattr(getattr(voter, 'voter', None), 'alt_phoneno2', '') or '',
+                    'alt_phoneno3': getattr(getattr(voter, 'voter', None), 'alt_phoneno3', '') or '',
                     'address': voter.address or '',
                     'booth_name': voter.booth_name or '',
                     'booth_no': getattr(getattr(voter, 'voter', None), 'booth', None).number if getattr(getattr(voter, 'voter', None), 'booth', None) else '',
@@ -720,6 +732,9 @@ class TelecallingFeedbackViewSet(viewsets.ModelViewSet):
                 'voter_name': survey.voter_name or '',
                 'voter_id_no': getattr(voter_obj, 'voter_id', '') or assignment_details.get('voter_id_no', ''),
                 'phone': survey.phone or getattr(voter_obj, 'phone', '') or assignment_details.get('phone', ''),
+                'phone2': getattr(voter_obj, 'phone2', '') or assignment_details.get('phone2', ''),
+                'alt_phoneno2': getattr(voter_obj, 'alt_phoneno2', '') or assignment_details.get('alt_phoneno2', ''),
+                'alt_phoneno3': getattr(voter_obj, 'alt_phoneno3', '') or assignment_details.get('alt_phoneno3', ''),
                 'booth_no': survey.booth_no or '',
                 'booth_name': getattr(booth_obj, 'name', '') or assignment_details.get('booth_name', ''),
                 'block': survey.block or '',

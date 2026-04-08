@@ -373,6 +373,7 @@ class FieldSurveyViewSet(viewsets.ModelViewSet):
         surveys = list(
             FieldSurvey.objects
             .filter(is_active=True, id__in=field_survey_ids)
+            .select_related('voter')
             .order_by('-survey_date', '-created_at', '-id')
         )
         booth_map = _survey_location_maps(surveys)
@@ -384,6 +385,10 @@ class FieldSurveyViewSet(viewsets.ModelViewSet):
         for survey in surveys:
             decision = latest_feedback_by_survey.get(survey.id)
             telecaller = (telecaller_by_voter.get(survey.voter_id) if survey.voter_id else None) or telecaller_by_name.get((survey.voter_name or '').strip().lower()) or {}
+            voter_phone = survey.voter.phone if survey.voter_id and survey.voter else ''
+            voter_phone2 = survey.voter.phone2 if survey.voter_id and survey.voter else ''
+            voter_alt_phone2 = survey.voter.alt_phoneno2 if survey.voter_id and survey.voter else ''
+            voter_alt_phone3 = survey.voter.alt_phoneno3 if survey.voter_id and survey.voter else ''
             if survey.assigned_volunteer:
                 volunteer_names.add(survey.assigned_volunteer)
             if telecaller.get('name'):
@@ -397,7 +402,10 @@ class FieldSurveyViewSet(viewsets.ModelViewSet):
                 'voter_name': survey.voter_name or '',
                 'age': survey.age,
                 'gender': survey.gender or '',
-                'phone': survey.phone or '',
+                'phone': survey.phone or voter_phone or '',
+                'phone2': voter_phone2 or '',
+                'alt_phoneno2': voter_alt_phone2 or '',
+                'alt_phoneno3': voter_alt_phone3 or '',
                 'address': survey.address or '',
                 'aware_of_candidate': survey.aware_of_candidate or '',
                 'likely_to_vote': survey.likely_to_vote or '',
