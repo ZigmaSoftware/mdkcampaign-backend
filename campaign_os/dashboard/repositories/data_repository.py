@@ -297,12 +297,57 @@ class DataRepository:
 
         return queryset
 
+    def _get_scoped_booth_values(self, filters: DashboardFilters):
+        booth_qs = self._filter_booth_queryset(
+            Booth.objects.filter(is_active=True),
+            filters,
+        )
+
+        if filters.booth_id:
+            booth_qs = booth_qs.filter(id=filters.booth_id)
+        elif filters.booth:
+            booth_value = filters.booth.strip()
+            booth_qs = booth_qs.filter(
+                Q(number__iexact=booth_value)
+                | Q(code__iexact=booth_value)
+                | Q(name__iexact=booth_value)
+            )
+
+        rows = list(booth_qs.values('id', 'number', 'name', 'code'))
+        booth_ids = tuple(row['id'] for row in rows if row.get('id'))
+        booth_numbers = tuple(row['number'] for row in rows if row.get('number'))
+        booth_names = tuple(row['name'] for row in rows if row.get('name'))
+        booth_codes = tuple(row['code'] for row in rows if row.get('code'))
+        booth_texts = tuple(
+            sorted({value for value in [*booth_numbers, *booth_names, *booth_codes] if value})
+        )
+        return {
+            'ids': booth_ids,
+            'numbers': booth_numbers,
+            'names': booth_names,
+            'codes': booth_codes,
+            'texts': booth_texts,
+        }
+
     def get_survey_queryset(self, filters: DashboardFilters):
         queryset = FieldSurvey.objects.filter(is_active=True).select_related('voter__booth')
 
         if filters.date:
             queryset = queryset.filter(survey_date=filters.date)
-        queryset = self._apply_booth_scope(queryset, 'voter__booth__', filters)
+
+        if filters.has_geography_scope:
+            booth_scope = self._get_scoped_booth_values(filters)
+            scope_q = Q()
+            has_scope = False
+            if booth_scope['ids']:
+                scope_q |= Q(voter__booth_id__in=booth_scope['ids'])
+                has_scope = True
+            if booth_scope['numbers']:
+                scope_q |= Q(booth_no__in=booth_scope['numbers'])
+                has_scope = True
+            if not has_scope:
+                return queryset.none()
+            queryset = queryset.filter(scope_q)
 
         if filters.booth_id:
             booth_q = Q(voter__booth_id=filters.booth_id)
@@ -333,7 +378,20 @@ class DataRepository:
 
         if filters.date:
             queryset = queryset.filter(date=filters.date)
-        queryset = self._apply_booth_scope(queryset, 'survey__voter__booth__', filters)
+
+        if filters.has_geography_scope:
+            booth_scope = self._get_scoped_booth_values(filters)
+            scope_q = Q()
+            has_scope = False
+            if booth_scope['ids']:
+                scope_q |= Q(survey__voter__booth_id__in=booth_scope['ids'])
+                has_scope = True
+            if booth_scope['numbers']:
+                scope_q |= Q(survey__booth_no__in=booth_scope['numbers'])
+                has_scope = True
+            if not has_scope:
+                return queryset.none()
+            queryset = queryset.filter(scope_q)
 
         if filters.booth_id:
             booth_q = Q(survey__voter__booth_id=filters.booth_id)
@@ -377,7 +435,20 @@ class DataRepository:
             queryset = queryset.filter(self._name_match_q(['telecaller_name'], filters.telecaller_names))
         elif filters.telecaller or filters.volunteer_role:
             queryset = queryset.none()
-        queryset = self._apply_booth_scope(queryset, 'voters__voter__booth__', filters)
+
+        if filters.has_geography_scope:
+            booth_scope = self._get_scoped_booth_values(filters)
+            scope_q = Q()
+            has_scope = False
+            if booth_scope['ids']:
+                scope_q |= Q(voters__voter__booth_id__in=booth_scope['ids'])
+                has_scope = True
+            if booth_scope['texts']:
+                scope_q |= Q(voters__booth_name__in=booth_scope['texts'])
+                has_scope = True
+            if not has_scope:
+                return queryset.none()
+            queryset = queryset.filter(scope_q)
 
         if filters.booth_id:
             booth_q = Q(voters__voter__booth_id=filters.booth_id)
@@ -402,7 +473,6 @@ class DataRepository:
 
         if filters.date:
             queryset = queryset.filter(assignment__assigned_date=filters.date)
-        queryset = self._apply_booth_scope(queryset, 'voter__booth__', filters)
 
         if filters.telecaller_ids:
             queryset = queryset.filter(
@@ -415,6 +485,20 @@ class DataRepository:
             )
         elif filters.telecaller or filters.volunteer_role:
             queryset = queryset.none()
+
+        if filters.has_geography_scope:
+            booth_scope = self._get_scoped_booth_values(filters)
+            scope_q = Q()
+            has_scope = False
+            if booth_scope['ids']:
+                scope_q |= Q(voter__booth_id__in=booth_scope['ids'])
+                has_scope = True
+            if booth_scope['texts']:
+                scope_q |= Q(booth_name__in=booth_scope['texts'])
+                has_scope = True
+            if not has_scope:
+                return queryset.none()
+            queryset = queryset.filter(scope_q)
 
         if filters.booth_id:
             booth_q = Q(voter__booth_id=filters.booth_id)
