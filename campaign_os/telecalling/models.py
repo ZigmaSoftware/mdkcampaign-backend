@@ -14,6 +14,10 @@ class TelecallingAssignment(BaseModel):
 
     class Meta:
         ordering = ['-assigned_date', '-created_at']
+        indexes = [
+            models.Index(fields=['assigned_date', 'telecaller_id'], name='telecall_asg_date_tid_idx'),
+            models.Index(fields=['telecaller_name'], name='telecall_asg_name_idx'),
+        ]
 
     def __str__(self):
         return f"{self.telecaller_name} — {self.assigned_date}"
@@ -39,6 +43,11 @@ class TelecallingAssignmentVoter(models.Model):
 
     class Meta:
         ordering = ['voter_name']
+        indexes = [
+            models.Index(fields=['voter_name'], name='telecall_asgv_name_idx'),
+            models.Index(fields=['assignment', 'voter'], name='telecall_asgv_asg_voter_idx'),
+            models.Index(fields=['assignment', 'voter_name'], name='telecall_asgv_asg_name_idx'),
+        ]
 
     def __str__(self):
         return f"{self.voter_name} → {self.assignment}"
@@ -68,6 +77,11 @@ class TelecallingFeedback(BaseModel):
 
     class Meta:
         ordering = ['-date', '-created_at']
+        indexes = [
+            models.Index(fields=['survey', 'date'], name='telecall_fb_survey_date_idx'),
+            models.Index(fields=['action', 'followup_type'], name='telecall_fb_action_type_idx'),
+            models.Index(fields=['followup_type', 'date'], name='telecall_fb_type_date_idx'),
+        ]
 
     def __str__(self):
         return f"{self.voter_name} — {self.action} ({self.date})"

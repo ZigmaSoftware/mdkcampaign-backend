@@ -101,6 +101,14 @@ class FieldSurvey(BaseModel):
         indexes = [
             models.Index(fields=['survey_date']),
             models.Index(fields=['support_level']),
+            models.Index(fields=['response_status'], name='activities_fs_resp_idx'),
+            models.Index(fields=['party_preference'], name='activities_fs_party_idx'),
+            models.Index(fields=['block'], name='activities_fs_block_idx'),
+            models.Index(fields=['booth_no'], name='activities_fs_booth_idx'),
+            models.Index(fields=['aware_of_candidate'], name='activities_fs_aware_idx'),
+            models.Index(fields=['likely_to_vote'], name='activities_fs_vote_idx'),
+            models.Index(fields=['assigned_volunteer'], name='activities_fs_vol_idx'),
+            models.Index(fields=['surveyed_by'], name='activities_fs_user_idx'),
         ]
 
     def __str__(self):

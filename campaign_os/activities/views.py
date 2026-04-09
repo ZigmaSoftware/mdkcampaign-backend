@@ -1,7 +1,17 @@
 import logging
 import re
 
-from django.db.models import Q
+from django.db.models import (
+    Q,
+    Count,
+    Sum,
+    Case,
+    When,
+    IntegerField,
+    OuterRef,
+    Subquery,
+    DateField,
+)
 from django.utils import timezone
 from rest_framework import viewsets, permissions
 from rest_framework.decorators import action
@@ -26,10 +36,13 @@ SURVEY_ID_PATTERN = re.compile(r'\[survey_id:(\d+)\]')
 def _build_telecaller_lookup_for_surveys(surveys):
     voter_ids = {survey.voter_id for survey in surveys if getattr(survey, 'voter_id', None)}
     voter_names = {
-        (survey.voter_name or '').strip().lower()
+        (survey.voter_name or '').strip()
         for survey in surveys
         if getattr(survey, 'voter_name', None)
     }
+
+    if not voter_ids and not voter_names:
+        return {}, {}
 
     assignment_rows = (
         TelecallingAssignmentVoter.objects
@@ -74,6 +87,137 @@ def _survey_location_maps(surveys):
                 'block': getattr(getattr(getattr(booth.panchayat, 'union', None), 'block', None), 'name', '') if booth.panchayat_id else '',
             }
     return booth_map
+
+
+def _annotate_latest_field_followup_feedback(queryset):
+    latest_feedback = (
+        TelecallingFeedback.objects
+        .filter(
+            is_active=True,
+            followup_type='field_survey',
+            survey_id=OuterRef('pk'),
+        )
+        .order_by('-date', '-created_at', '-id')
+    )
+    return queryset.annotate(
+        latest_decision_id=Subquery(latest_feedback.values('id')[:1]),
+        latest_decision_action=Subquery(latest_feedback.values('action')[:1]),
+        latest_decision_followup_type=Subquery(latest_feedback.values('followup_type')[:1]),
+        latest_decision_date=Subquery(latest_feedback.values('date')[:1], output_field=DateField()),
+    )
+
+
+def _followup_count_payload(queryset):
+    agg = queryset.order_by().aggregate(
+        all=Count('id'),
+        done=Sum(
+            Case(
+                When(latest_decision_action='followup_not_required', then=1),
+                default=0,
+                output_field=IntegerField(),
+            )
+        ),
+    )
+    total = int(agg.get('all') or 0)
+    done = int(agg.get('done') or 0)
+    return {
+        'all': total,
+        'pending': max(0, total - done),
+        'done': done,
+    }
+
+
+def _apply_location_filters(queryset, *, block='', panchayat='', union=''):
+    if not block and not panchayat and not union:
+        return queryset
+
+    rows = list(queryset.order_by().values('id', 'booth_no', 'block'))
+    if not rows:
+        return queryset.none()
+
+    booth_numbers = {(row.get('booth_no') or '').strip() for row in rows if (row.get('booth_no') or '').strip()}
+    booth_map = {}
+    if booth_numbers:
+        booths = (
+            Booth.objects
+            .filter(is_active=True, number__in=booth_numbers)
+            .select_related('panchayat__union__block')
+        )
+        for booth in booths:
+            booth_map[booth.number] = {
+                'panchayat': getattr(booth.panchayat, 'name', '') if booth.panchayat_id else '',
+                'union': getattr(getattr(booth.panchayat, 'union', None), 'name', '') if booth.panchayat_id else '',
+                'block': getattr(getattr(getattr(booth.panchayat, 'union', None), 'block', None), 'name', '') if booth.panchayat_id else '',
+            }
+
+    matched_ids = []
+    for row in rows:
+        location = booth_map.get((row.get('booth_no') or '').strip(), {})
+        row_block = (row.get('block') or location.get('block') or '')
+        if block and row_block != block:
+            continue
+        if panchayat and (location.get('panchayat') or '') != panchayat:
+            continue
+        if union and (location.get('union') or '') != union:
+            continue
+        matched_ids.append(row['id'])
+
+    if not matched_ids:
+        return queryset.none()
+    return queryset.filter(id__in=matched_ids)
+
+
+def _telecaller_lookup_for_survey_rows(survey_rows):
+    voter_ids = {row.get('voter_id') for row in survey_rows if row.get('voter_id')}
+    voter_names = {(row.get('voter_name') or '').strip() for row in survey_rows if (row.get('voter_name') or '').strip()}
+    if not voter_ids and not voter_names:
+        return {}, {}
+
+    assignment_rows = (
+        TelecallingAssignmentVoter.objects
+        .filter(
+            Q(voter_id__in=voter_ids) |
+            Q(voter_name__in=list(voter_names))
+        )
+        .select_related('assignment')
+        .order_by('-assignment__assigned_date', '-assignment__created_at', '-assignment_id', '-id')
+    )
+
+    by_voter = {}
+    by_name = {}
+    for row in assignment_rows:
+        info = {
+            'name': row.assignment.telecaller_name or '',
+            'phone': row.assignment.telecaller_phone or '',
+        }
+        if row.voter_id and row.voter_id not in by_voter:
+            by_voter[row.voter_id] = info
+        if row.voter_name:
+            normalized = row.voter_name.strip().lower()
+            if normalized and normalized not in by_name:
+                by_name[normalized] = info
+    return by_voter, by_name
+
+
+def _apply_telecaller_filter(queryset, telecaller_name):
+    if not telecaller_name:
+        return queryset
+
+    survey_rows = list(queryset.order_by().values('id', 'voter_id', 'voter_name'))
+    if not survey_rows:
+        return queryset.none()
+
+    by_voter, by_name = _telecaller_lookup_for_survey_rows(survey_rows)
+    matched_ids = []
+    for row in survey_rows:
+        normalized = (row.get('voter_name') or '').strip().lower()
+        resolved = by_voter.get(row.get('voter_id')) or by_name.get(normalized) or {}
+        if resolved.get('name', '') == telecaller_name:
+            matched_ids.append(row['id'])
+
+    if not matched_ids:
+        return queryset.none()
+    return queryset.filter(id__in=matched_ids)
 
 
 def _user_has_screen_flag(user, screen_slug, flag):
@@ -347,18 +491,11 @@ class FieldSurveyViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='followup-list')
     def followup_list(self, request):
-        feedbacks = list(
+        field_survey_ids = set(
             TelecallingFeedback.objects
             .filter(is_active=True, followup_type='field_survey', survey__isnull=False)
-            .order_by('-date', '-created_at', '-id')
+            .values_list('survey_id', flat=True)
         )
-        latest_feedback_by_survey = {}
-        field_survey_ids = set()
-        for feedback in feedbacks:
-            if feedback.survey_id:
-                field_survey_ids.add(feedback.survey_id)
-                if feedback.survey_id not in latest_feedback_by_survey:
-                    latest_feedback_by_survey[feedback.survey_id] = feedback
 
         log_notes = ActivityLog.objects.filter(
             is_active=True,
@@ -370,30 +507,121 @@ class FieldSurveyViewSet(viewsets.ModelViewSet):
             if match:
                 field_survey_ids.add(int(match.group(1)))
 
-        surveys = list(
+        if not field_survey_ids:
+            response = Response({'results': [], 'count': 0})
+            response.data['counts'] = {'all': 0, 'pending': 0, 'done': 0}
+            response.data['filtered_counts'] = {'all': 0, 'pending': 0, 'done': 0}
+            response.data['volunteers'] = []
+            response.data['telecallers'] = []
+            return response
+
+        base_surveys = _annotate_latest_field_followup_feedback(
             FieldSurvey.objects
             .filter(is_active=True, id__in=field_survey_ids)
             .select_related('voter')
             .order_by('-survey_date', '-created_at', '-id')
         )
-        booth_map = _survey_location_maps(surveys)
+
+        base_counts = _followup_count_payload(base_surveys)
+        volunteer_names = sorted(
+            [
+                name
+                for name in base_surveys.order_by().values_list('assigned_volunteer', flat=True).distinct()
+                if name
+            ]
+        )
+        telecaller_row_lookup = list(base_surveys.order_by().values('voter_id', 'voter_name'))
+        telecaller_lookup_by_voter, telecaller_lookup_by_name = _telecaller_lookup_for_survey_rows(telecaller_row_lookup)
+        telecaller_names = sorted(
+            {
+                (
+                    telecaller_lookup_by_voter.get(row.get('voter_id')) or
+                    telecaller_lookup_by_name.get((row.get('voter_name') or '').strip().lower()) or {}
+                ).get('name', '')
+                for row in telecaller_row_lookup
+            } - {''},
+            key=str.lower,
+        )
+
+        scoped_surveys = base_surveys
+
+        search = (request.query_params.get('search') or '').strip()
+        if search:
+            scoped_surveys = scoped_surveys.filter(
+                Q(voter_name__icontains=search) |
+                Q(booth_no__icontains=search) |
+                Q(block__icontains=search)
+            )
+
+        booth = (request.query_params.get('booth') or '').strip()
+        if booth:
+            scoped_surveys = scoped_surveys.filter(booth_no=booth)
+
+        volunteer = (request.query_params.get('volunteer') or '').strip()
+        if volunteer:
+            scoped_surveys = scoped_surveys.filter(assigned_volunteer=volunteer)
+
+        support_level = (request.query_params.get('support_level') or '').strip()
+        if support_level:
+            scoped_surveys = scoped_surveys.filter(support_level=support_level)
+
+        response_status = (request.query_params.get('response_status') or '').strip()
+        if response_status:
+            scoped_surveys = scoped_surveys.filter(response_status=response_status)
+
+        aware_of_candidate = (request.query_params.get('aware_of_candidate') or '').strip()
+        if aware_of_candidate:
+            scoped_surveys = scoped_surveys.filter(aware_of_candidate=aware_of_candidate)
+
+        likely_to_vote = (request.query_params.get('likely_to_vote') or '').strip()
+        if likely_to_vote:
+            scoped_surveys = scoped_surveys.filter(likely_to_vote=likely_to_vote)
+
+        party = (request.query_params.get('party') or '').strip()
+        if party:
+            scoped_surveys = scoped_surveys.filter(party_preference=party)
+
+        scoped_surveys = _apply_location_filters(
+            scoped_surveys,
+            block=(request.query_params.get('block') or '').strip(),
+            panchayat=(request.query_params.get('panchayat') or '').strip(),
+            union=(request.query_params.get('union') or '').strip(),
+        )
+
+        telecaller = (request.query_params.get('telecaller') or '').strip()
+        scoped_surveys = _apply_telecaller_filter(scoped_surveys, telecaller)
+
+        date_from = (request.query_params.get('date_from') or '').strip()
+        if date_from:
+            scoped_surveys = scoped_surveys.filter(survey_date__gte=date_from)
+
+        date_to = (request.query_params.get('date_to') or '').strip()
+        if date_to:
+            scoped_surveys = scoped_surveys.filter(survey_date__lte=date_to)
+
+        filtered_counts = _followup_count_payload(scoped_surveys)
+
+        status_filter = (request.query_params.get('status') or 'all').strip().lower()
+        if status_filter == 'pending':
+            scoped_surveys = scoped_surveys.exclude(latest_decision_action='followup_not_required')
+        elif status_filter == 'done':
+            scoped_surveys = scoped_surveys.filter(latest_decision_action='followup_not_required')
+
+        page = self.paginate_queryset(scoped_surveys)
+        surveys = list(page) if page is not None else list(scoped_surveys)
         telecaller_by_voter, telecaller_by_name = _build_telecaller_lookup_for_surveys(surveys)
 
-        base_enriched = []
-        volunteer_names = set()
-        telecaller_names = set()
+        payload = []
         for survey in surveys:
-            decision = latest_feedback_by_survey.get(survey.id)
-            telecaller = (telecaller_by_voter.get(survey.voter_id) if survey.voter_id else None) or telecaller_by_name.get((survey.voter_name or '').strip().lower()) or {}
-            voter_phone = survey.voter.phone if survey.voter_id and survey.voter else ''
-            voter_phone2 = survey.voter.phone2 if survey.voter_id and survey.voter else ''
-            voter_alt_phone2 = survey.voter.alt_phoneno2 if survey.voter_id and survey.voter else ''
-            voter_alt_phone3 = survey.voter.alt_phoneno3 if survey.voter_id and survey.voter else ''
-            if survey.assigned_volunteer:
-                volunteer_names.add(survey.assigned_volunteer)
-            if telecaller.get('name'):
-                telecaller_names.add(telecaller['name'])
-            base_enriched.append({
+            decision_date = getattr(survey, 'latest_decision_date', None)
+            normalized_name = (survey.voter_name or '').strip().lower()
+            telecaller_info = (
+                (telecaller_by_voter.get(survey.voter_id) if survey.voter_id else None) or
+                telecaller_by_name.get(normalized_name) or
+                {}
+            )
+            voter = survey.voter if survey.voter_id and survey.voter else None
+            payload.append({
                 'id': survey.id,
                 'survey_date': str(survey.survey_date) if survey.survey_date else '',
                 'block': survey.block or '',
@@ -402,10 +630,10 @@ class FieldSurveyViewSet(viewsets.ModelViewSet):
                 'voter_name': survey.voter_name or '',
                 'age': survey.age,
                 'gender': survey.gender or '',
-                'phone': survey.phone or voter_phone or '',
-                'phone2': voter_phone2 or '',
-                'alt_phoneno2': voter_alt_phone2 or '',
-                'alt_phoneno3': voter_alt_phone3 or '',
+                'phone': survey.phone or (voter.phone if voter else '') or '',
+                'phone2': (voter.phone2 if voter else '') or '',
+                'alt_phoneno2': (voter.alt_phoneno2 if voter else '') or '',
+                'alt_phoneno3': (voter.alt_phoneno3 if voter else '') or '',
                 'address': survey.address or '',
                 'aware_of_candidate': survey.aware_of_candidate or '',
                 'likely_to_vote': survey.likely_to_vote or '',
@@ -415,116 +643,22 @@ class FieldSurveyViewSet(viewsets.ModelViewSet):
                 'response_status': survey.response_status or '',
                 'surveyed_by': survey.surveyed_by or '',
                 'assigned_volunteer': survey.assigned_volunteer or '',
-                'telecaller_name': telecaller.get('name', ''),
-                'telecaller_phone': telecaller.get('phone', ''),
+                'telecaller_name': telecaller_info.get('name', ''),
+                'telecaller_phone': telecaller_info.get('phone', ''),
                 'decision': {
-                    'action': decision.action,
-                    'followup_type': decision.followup_type or '',
-                    'date': str(decision.date),
-                } if decision else None,
+                    'action': survey.latest_decision_action,
+                    'followup_type': survey.latest_decision_followup_type or '',
+                    'date': str(decision_date) if decision_date else '',
+                } if survey.latest_decision_id else None,
             })
 
-        base_counts = {
-            'all': len(base_enriched),
-            'pending': sum(1 for row in base_enriched if not row['decision'] or row['decision']['action'] != 'followup_not_required'),
-            'done': sum(1 for row in base_enriched if row['decision'] and row['decision']['action'] == 'followup_not_required'),
-        }
-
-        filtered_enriched = base_enriched
-        search = (request.query_params.get('search') or '').strip().lower()
-        if search:
-            filtered_enriched = [
-                row for row in filtered_enriched
-                if search in (row['voter_name'] or '').lower()
-                or search in (row['booth_no'] or '').lower()
-                or search in (row['block'] or '').lower()
-            ]
-
-        booth = (request.query_params.get('booth') or '').strip()
-        if booth:
-            filtered_enriched = [row for row in filtered_enriched if (row['booth_no'] or '') == booth]
-
-        volunteer = (request.query_params.get('volunteer') or '').strip()
-        if volunteer:
-            filtered_enriched = [row for row in filtered_enriched if (row['assigned_volunteer'] or '') == volunteer]
-
-        support_level = (request.query_params.get('support_level') or '').strip()
-        if support_level:
-            filtered_enriched = [row for row in filtered_enriched if (row['support_level'] or '') == support_level]
-
-        response_status = (request.query_params.get('response_status') or '').strip()
-        if response_status:
-            filtered_enriched = [row for row in filtered_enriched if (row['response_status'] or '') == response_status]
-
-        aware_of_candidate = (request.query_params.get('aware_of_candidate') or '').strip()
-        if aware_of_candidate:
-            filtered_enriched = [row for row in filtered_enriched if (row['aware_of_candidate'] or '') == aware_of_candidate]
-
-        likely_to_vote = (request.query_params.get('likely_to_vote') or '').strip()
-        if likely_to_vote:
-            filtered_enriched = [row for row in filtered_enriched if (row['likely_to_vote'] or '') == likely_to_vote]
-
-        party = (request.query_params.get('party') or '').strip()
-        if party:
-            filtered_enriched = [row for row in filtered_enriched if (row['party_preference'] or '') == party]
-
-        block = (request.query_params.get('block') or '').strip()
-        if block:
-            filtered_enriched = [
-                row for row in filtered_enriched
-                if ((row['block'] or booth_map.get(row['booth_no'] or '', {}).get('block') or '') == block)
-            ]
-
-        panchayat = (request.query_params.get('panchayat') or '').strip()
-        if panchayat:
-            filtered_enriched = [
-                row for row in filtered_enriched
-                if (booth_map.get(row['booth_no'] or '', {}).get('panchayat') or '') == panchayat
-            ]
-
-        union = (request.query_params.get('union') or '').strip()
-        if union:
-            filtered_enriched = [
-                row for row in filtered_enriched
-                if (booth_map.get(row['booth_no'] or '', {}).get('union') or '') == union
-            ]
-
-        telecaller = (request.query_params.get('telecaller') or '').strip()
-        if telecaller:
-            filtered_enriched = [row for row in filtered_enriched if (row['telecaller_name'] or '') == telecaller]
-
-        date_from = (request.query_params.get('date_from') or '').strip()
-        if date_from:
-            filtered_enriched = [
-                row for row in filtered_enriched
-                if (row['survey_date'] or '') and (row['survey_date'] or '') >= date_from
-            ]
-
-        date_to = (request.query_params.get('date_to') or '').strip()
-        if date_to:
-            filtered_enriched = [
-                row for row in filtered_enriched
-                if (row['survey_date'] or '') and (row['survey_date'] or '') <= date_to
-            ]
-
-        filtered_counts = {
-            'all': len(filtered_enriched),
-            'pending': sum(1 for row in filtered_enriched if not row['decision'] or row['decision']['action'] != 'followup_not_required'),
-            'done': sum(1 for row in filtered_enriched if row['decision'] and row['decision']['action'] == 'followup_not_required'),
-        }
-
-        status_filter = (request.query_params.get('status') or 'all').strip().lower()
-        enriched = filtered_enriched
-        if status_filter == 'pending':
-            enriched = [row for row in filtered_enriched if not row['decision'] or row['decision']['action'] != 'followup_not_required']
-        elif status_filter == 'done':
-            enriched = [row for row in filtered_enriched if row['decision'] and row['decision']['action'] == 'followup_not_required']
-
-        page = self.paginate_queryset(enriched)
-        payload = page if page is not None else enriched
-        response = self.get_paginated_response(payload) if page is not None else Response({'results': payload, 'count': len(payload)})
+        response = (
+            self.get_paginated_response(payload)
+            if page is not None
+            else Response({'results': payload, 'count': len(payload)})
+        )
         response.data['counts'] = base_counts
         response.data['filtered_counts'] = filtered_counts
-        response.data['volunteers'] = sorted(volunteer_names)
-        response.data['telecallers'] = sorted(telecaller_names, key=str.lower)
+        response.data['volunteers'] = volunteer_names
+        response.data['telecallers'] = telecaller_names
         return response
