@@ -4,6 +4,7 @@ Opinion poll models
 import secrets
 from django.db import models
 from django.db.models import Count
+from django.utils import timezone
 from campaign_os.core.models import BaseModel
 
 
@@ -42,17 +43,107 @@ class Poll(BaseModel):
     def __str__(self):
         return self.title
 
-    def vote_counts(self):
-        """Returns dict: {option_id: count} for Q1 and Q2 separately"""
-        q1 = (PollVote.objects.filter(poll=self, q1_option__isnull=False)
-              .values('q1_option').annotate(cnt=Count('id')))
-        q2 = (PollVote.objects.filter(poll=self, q2_option__isnull=False)
-              .values('q2_option').annotate(cnt=Count('id')))
+    def resolve_reset_window(self, reset_id=None, now=None):
+        """
+        Resolve a vote counting window for this poll.
+
+        - If reset_id is provided, use that reset's window.
+        - Otherwise use the latest reset with starts_at <= now (current window).
+        - If no reset matches, return all-time window (None, None, None).
+        """
+        now = now or timezone.now()
+        resets = self.resets.filter(is_active=True).order_by('starts_at', 'id')
+
+        selected = None
+        if reset_id is not None and str(reset_id).strip() != '':
+            try:
+                reset_pk = int(reset_id)
+            except (TypeError, ValueError):
+                reset_pk = None
+            if reset_pk:
+                selected = resets.filter(id=reset_pk).first()
+                if not selected:
+                    return None, None, None
+
+        if selected is None:
+            selected = resets.filter(starts_at__lte=now).order_by('-starts_at', '-id').first()
+            if not selected:
+                return None, None, None
+
+        next_reset = resets.filter(starts_at__gt=selected.starts_at).order_by('starts_at', 'id').first()
+        return selected, selected.starts_at, (next_reset.starts_at if next_reset else None)
+
+    def resolve_session_window(self, session_key=None, now=None):
+        """
+        Resolve a named poll session window.
+
+        Session model:
+        - Poll 1  => "base" window (before first reset, or all-time if no resets)
+        - Poll N>1 => window that starts at reset id <session_key>
+        - Latest/current window is used when session_key is empty/'latest'/'current'
+        """
+        now = now or timezone.now()
+        resets = self.resets.filter(is_active=True).order_by('starts_at', 'id')
+        key = str(session_key or '').strip().lower()
+
+        # Default: latest/current session
+        if key in {'', 'latest', 'current'}:
+            current_reset = resets.filter(starts_at__lte=now).order_by('-starts_at', '-id').first()
+            if not current_reset:
+                return 'base', None, None
+            return str(current_reset.id), current_reset.starts_at, None
+
+        # Base session (before first reset)
+        if key == 'base':
+            first_reset = resets.first()
+            return 'base', None, (first_reset.starts_at if first_reset else None)
+
+        # Session keyed by reset id
+        try:
+            reset_pk = int(key)
+        except (TypeError, ValueError):
+            return None, None, None
+
+        selected = resets.filter(id=reset_pk).first()
+        if not selected:
+            return None, None, None
+        next_reset = resets.filter(starts_at__gt=selected.starts_at).order_by('starts_at', 'id').first()
+        return str(selected.id), selected.starts_at, (next_reset.starts_at if next_reset else None)
+
+    def vote_counts(self, start_at=None, end_at=None):
+        """Return Q1/Q2/total counts for a given vote window."""
+        votes = PollVote.objects.filter(poll=self)
+        if start_at:
+            votes = votes.filter(voted_at__gte=start_at)
+        if end_at:
+            votes = votes.filter(voted_at__lt=end_at)
+
+        q1 = votes.filter(q1_option__isnull=False).values('q1_option').annotate(cnt=Count('id'))
+        q2 = votes.filter(q2_option__isnull=False).values('q2_option').annotate(cnt=Count('id'))
         return {
             'q1': {row['q1_option']: row['cnt'] for row in q1},
             'q2': {row['q2_option']: row['cnt'] for row in q2},
-            'total': PollVote.objects.filter(poll=self).count(),
+            'total': votes.count(),
         }
+
+
+class PollReset(BaseModel):
+    """
+    Date-wise reset marker.
+    Votes are never deleted; each reset defines a new counting window.
+    """
+    poll = models.ForeignKey(Poll, on_delete=models.CASCADE, related_name='resets', db_constraint=False)
+    starts_at = models.DateTimeField(db_index=True)
+    note = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        ordering = ['-starts_at', '-created_at']
+        indexes = [
+            models.Index(fields=['poll', 'starts_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.poll.title} reset @ {self.starts_at}"
 
 
 class PollOption(BaseModel):

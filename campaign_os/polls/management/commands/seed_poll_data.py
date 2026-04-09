@@ -20,9 +20,14 @@ class Command(BaseCommand):
         )
         if not created:
             self.stdout.write('Poll already exists, updating options...')
+            if not poll.is_active:
+                poll.is_active = True
+                poll.save(update_fields=['is_active'])
+                self.stdout.write('Re-activated existing poll.')
 
-        # Clear existing options
-        poll.options.all().delete()
+        # NOTE:
+        # Do not delete options. Deleting options can null-out old PollVote FK links
+        # (q1_option uses SET_NULL) and break historical party-wise breakdown.
 
         # Q1 - Alliance options
         q1_options = [
@@ -33,10 +38,21 @@ class Command(BaseCommand):
             {'key': 'other',  'name': 'Others / வேறு',       'name_ta': 'சுயேட்சை / Independent',     'sub_label': '',                                       'icon_bg': 'linear-gradient(135deg,#4b5563,#374151)', 'bar_color': '#6b7280', 'is_winner': False, 'display_order': 5},
             {'key': 'nota',   'name': 'NOTA',                 'name_ta': 'மேற்கண்ட யாருமில்லை',        'sub_label': 'None of the Above',                      'icon_bg': 'linear-gradient(135deg,#555,#333)',       'bar_color': '#888888', 'is_winner': False, 'display_order': 6},
         ]
+        created_count = 0
+        updated_count = 0
         for opt in q1_options:
-            PollOption.objects.create(poll=poll, question_no=1, **opt)
+            obj, created_opt = PollOption.objects.update_or_create(
+                poll=poll,
+                question_no=1,
+                key=opt['key'],
+                defaults=opt,
+            )
+            if created_opt:
+                created_count += 1
+            else:
+                updated_count += 1
 
         
         self.stdout.write(self.style.SUCCESS(f'Poll seeded: {poll.title} (id={poll.id})'))
-        self.stdout.write(f'  Q1 options: {len(q1_options)} (incl. NOTA)')
+        self.stdout.write(f'  Q1 options: {len(q1_options)} (incl. NOTA) · created={created_count}, updated={updated_count}')
         # self.stdout.write(f'  Q2 options: {len(q2_options)}')

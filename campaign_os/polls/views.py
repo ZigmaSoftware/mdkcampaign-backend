@@ -5,12 +5,18 @@ import urllib.request
 import urllib.parse
 from django.conf import settings
 from django.http import HttpResponseRedirect, HttpResponseNotFound
+from django.utils import timezone
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
-from .models import Poll, PollOption, PollVote
-from .serializers import PollDetailSerializer, CastVoteSerializer, PollOptionSerializer
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from .models import Poll, PollVote, PollReset
+from .serializers import (
+    PollDetailSerializer,
+    CastVoteSerializer,
+    PollResetSerializer,
+    CreatePollResetSerializer,
+)
 
 
 def _make_short_url(long_url: str) -> str | None:
@@ -49,6 +55,26 @@ class PollViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = PollDetailSerializer
     permission_classes = [AllowAny]
 
+    def _can_view_poll_management(self, request):
+        if not request.user.is_authenticated:
+            return False
+        username = (getattr(request.user, 'username', '') or '').strip().lower()
+        return getattr(request.user, 'role', None) == 'admin' or username == 'poll'
+
+    def _can_create_poll_session(self, request):
+        if not request.user.is_authenticated:
+            return False
+        username = (getattr(request.user, 'username', '') or '').strip().lower()
+        return username == 'poll'
+
+    def _windowed_votes(self, poll, start_at=None, end_at=None):
+        votes = PollVote.objects.filter(poll=poll)
+        if start_at:
+            votes = votes.filter(voted_at__gte=start_at)
+        if end_at:
+            votes = votes.filter(voted_at__lt=end_at)
+        return votes
+
     def get_serializer_context(self):
         ctx = super().get_serializer_context()
         ctx['request'] = self.request
@@ -70,8 +96,22 @@ class PollViewSet(viewsets.ReadOnlyModelViewSet):
                 poll.share_url = shortened
                 poll.save(update_fields=['share_url'])
 
+        session_key = request.query_params.get('session') or request.query_params.get('reset_id')
+        selected_session_key = None
+        start_at = None
+        end_at = None
+        if session_key and self._can_view_poll_management(request):
+            selected_session_key, start_at, end_at = poll.resolve_session_window(session_key=session_key)
+            if selected_session_key is None:
+                return Response({'detail': 'Invalid session'}, status=status.HTTP_404_NOT_FOUND)
+        else:
+            selected_session_key, start_at, end_at = poll.resolve_session_window()
+
         ctx = self.get_serializer_context()
         ctx['device_id'] = request.query_params.get('device_id', '')
+        ctx['poll_reset_start'] = start_at
+        ctx['poll_reset_end'] = end_at
+        ctx['poll_session_key'] = selected_session_key
         serializer = PollDetailSerializer(poll, context=ctx)
         return Response(serializer.data)
 
@@ -84,13 +124,15 @@ class PollViewSet(viewsets.ReadOnlyModelViewSet):
 
         voter_ip    = get_client_ip(request)
         device_id   = (request.data.get('device_id') or '').strip()[:64]
+        _, start_at, end_at = poll.resolve_session_window()
+        window_votes = self._windowed_votes(poll, start_at=start_at, end_at=end_at)
 
         # Deduplicate: device_id (highest priority) → user → IP
-        if device_id and PollVote.objects.filter(poll=poll, voter_device_id=device_id).exists():
+        if device_id and window_votes.filter(voter_device_id=device_id).exists():
             return Response({'detail': 'already_voted', 'message': 'Already voted from this device'}, status=status.HTTP_400_BAD_REQUEST)
-        if request.user.is_authenticated and PollVote.objects.filter(poll=poll, voter_user=request.user).exists():
+        if request.user.is_authenticated and window_votes.filter(voter_user=request.user).exists():
             return Response({'detail': 'already_voted', 'message': 'You have already voted on this poll'}, status=status.HTTP_400_BAD_REQUEST)
-        if not device_id and PollVote.objects.filter(poll=poll, voter_ip=voter_ip).exists():
+        if not device_id and window_votes.filter(voter_ip=voter_ip).exists():
             return Response({'detail': 'already_voted', 'message': 'You have already voted on this poll'}, status=status.HTTP_400_BAD_REQUEST)
 
         serializer = CastVoteSerializer(data=request.data, context={'poll': poll, 'request': request})
@@ -110,18 +152,34 @@ class PollViewSet(viewsets.ReadOnlyModelViewSet):
 
         ctx = self.get_serializer_context()
         ctx['device_id'] = device_id
+        ctx['poll_reset_start'] = start_at
+        ctx['poll_reset_end'] = end_at
         updated = PollDetailSerializer(poll, context=ctx).data
         return Response(updated, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['GET'], url_path='votes', permission_classes=[IsAuthenticated])
     def votes_list(self, request, pk=None):
         """Admin-only: list all individual votes for this poll"""
-        if getattr(request.user, 'role', None) != 'admin':
-            return Response({'detail': 'Admin only'}, status=status.HTTP_403_FORBIDDEN)
+        if not self._can_view_poll_management(request):
+            return Response({'detail': 'Poll management access required'}, status=status.HTTP_403_FORBIDDEN)
         poll = self.get_object()
-        votes = PollVote.objects.filter(poll=poll).select_related(
+        session_key = request.query_params.get('session') or request.query_params.get('reset_id')
+        selected_session_key = None
+        start_at = None
+        end_at = None
+        if session_key and session_key == 'all':
+            start_at = None
+            end_at = None
+        elif session_key:
+            selected_session_key, start_at, end_at = poll.resolve_session_window(session_key=session_key)
+            if selected_session_key is None:
+                return Response({'detail': 'Invalid session'}, status=status.HTTP_404_NOT_FOUND)
+        else:
+            selected_session_key, start_at, end_at = poll.resolve_session_window()
+
+        votes = self._windowed_votes(poll, start_at=start_at, end_at=end_at).select_related(
             'voter_user', 'q1_option', 'q2_option'
-        ).order_by('-created_at')
+        ).order_by('-voted_at')
         data = [{
             'id':          v.id,
             'username':    v.voter_user.username if v.voter_user else (v.voter_name or '—'),
@@ -142,14 +200,16 @@ class PollViewSet(viewsets.ReadOnlyModelViewSet):
         """Update q2_option on an existing vote (after Q1 already submitted)"""
         poll = self.get_object()
         voter_ip = get_client_ip(request)
+        _, start_at, end_at = poll.resolve_session_window()
+        window_votes = self._windowed_votes(poll, start_at=start_at, end_at=end_at)
 
         device_id = (request.data.get('device_id') or '').strip()[:64]
         if device_id:
-            vote = PollVote.objects.filter(poll=poll, voter_device_id=device_id).first()
+            vote = window_votes.filter(voter_device_id=device_id).first()
         elif request.user.is_authenticated:
-            vote = PollVote.objects.filter(poll=poll, voter_user=request.user).first()
+            vote = window_votes.filter(voter_user=request.user).first()
         else:
-            vote = PollVote.objects.filter(poll=poll, voter_ip=voter_ip).first()
+            vote = window_votes.filter(voter_ip=voter_ip).first()
 
         if not vote:
             return Response({'detail': 'No vote found to update'}, status=status.HTTP_404_NOT_FOUND)
@@ -161,5 +221,38 @@ class PollViewSet(viewsets.ReadOnlyModelViewSet):
 
         ctx = self.get_serializer_context()
         ctx['device_id'] = device_id
+        ctx['poll_reset_start'] = start_at
+        ctx['poll_reset_end'] = end_at
         updated = PollDetailSerializer(poll, context=ctx).data
         return Response(updated)
+
+    @action(detail=True, methods=['GET', 'POST'], url_path='resets', permission_classes=[IsAuthenticated])
+    def resets(self, request, pk=None):
+        """Admin-only: manage reset windows for poll counting."""
+        if request.method == 'POST':
+            if not self._can_create_poll_session(request):
+                return Response({'detail': 'Only poll session manager can create sessions'}, status=status.HTTP_403_FORBIDDEN)
+        else:
+            if not self._can_view_poll_management(request):
+                return Response({'detail': 'Poll management access required'}, status=status.HTTP_403_FORBIDDEN)
+
+        poll = self.get_object()
+
+        if request.method == 'POST':
+            serializer = CreatePollResetSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            starts_at = timezone.now()
+            note = serializer.validated_data.get('note', '')
+            reset = PollReset.objects.create(
+                poll=poll,
+                starts_at=starts_at,
+                note=note,
+                created_by=request.user,
+                updated_by=request.user,
+            )
+            data = PollResetSerializer(reset, context={'poll': poll}).data
+            return Response(data, status=status.HTTP_201_CREATED)
+
+        resets = poll.resets.filter(is_active=True).order_by('-starts_at', '-id')
+        data = PollResetSerializer(resets, many=True, context={'poll': poll}).data
+        return Response(data)

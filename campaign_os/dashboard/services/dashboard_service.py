@@ -437,6 +437,44 @@ class DashboardService:
             row['rank'] = index
         return {'rows': rows}
 
+    def get_telecaller_efficiency_by_date(self, validated_data: dict) -> dict:
+        requested_date = validated_data.get('date')
+
+        if requested_date:
+            activity_dates = [requested_date]
+        else:
+            base_filters = self.build_filters({**validated_data, 'date': None})
+            survey_dates = set(
+                self.repo.get_survey_queryset(base_filters)
+                .exclude(survey_date__isnull=True)
+                .values_list('survey_date', flat=True)
+                .distinct()
+            )
+            assignment_dates = set(
+                self.repo.get_assignment_queryset(base_filters)
+                .exclude(assigned_date__isnull=True)
+                .values_list('assigned_date', flat=True)
+                .distinct()
+            )
+            feedback_dates = set(
+                self.repo.get_feedback_queryset(base_filters)
+                .exclude(date__isnull=True)
+                .values_list('date', flat=True)
+                .distinct()
+            )
+            activity_dates = sorted(survey_dates | assignment_dates | feedback_dates, reverse=True)
+
+        rows = []
+        for activity_date in activity_dates:
+            daily_rows = self.get_telecaller_efficiency({**validated_data, 'date': activity_date}).get('rows', [])
+            for row in daily_rows:
+                rows.append({
+                    'date': str(activity_date),
+                    **row,
+                })
+
+        return {'rows': rows}
+
     def get_task_panel(self, validated_data: dict) -> dict:
         filters = self.build_filters(validated_data)
         queryset = self.repo.get_task_queryset(filters)

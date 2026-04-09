@@ -129,6 +129,19 @@ def dashboard_telecallers(request):
 
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
+def dashboard_telecallers_by_date(request):
+    if not _has_view_access(request, 'activity-dashboard'):
+        return _forbidden_response()
+    try:
+        data = DashboardService().get_telecaller_efficiency_by_date(_validate_filters(request))
+        return Response(data)
+    except Exception:
+        logger.exception('Dashboard telecaller date-wise efficiency failed')
+        return Response({'rows': []}, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
 def dashboard_tasks(request):
     if not _has_view_access(request, 'activity-dashboard'):
         return _forbidden_response()
