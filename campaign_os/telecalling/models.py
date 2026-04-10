@@ -25,6 +25,12 @@ class TelecallingAssignment(BaseModel):
 
 class TelecallingAssignmentVoter(models.Model):
     """A voter row inside an assignment."""
+    ENTITY_TYPE_CHOICES = [
+        ('voter', 'Voter'),
+        ('volunteer', 'Volunteer'),
+        ('beneficiary', 'Beneficiary'),
+    ]
+
     assignment  = models.ForeignKey(
         TelecallingAssignment, on_delete=models.CASCADE,
         related_name='voters'
@@ -37,9 +43,13 @@ class TelecallingAssignmentVoter(models.Model):
     voter_id_no = models.CharField(max_length=50, blank=True)   # voter card ID
     phone       = models.CharField(max_length=20, blank=True)
     address     = models.CharField(max_length=500, blank=True)
+    booth_no    = models.CharField(max_length=20, blank=True)
     booth_name  = models.CharField(max_length=200, blank=True)
     age         = models.IntegerField(null=True, blank=True)
     gender      = models.CharField(max_length=10, blank=True)
+    entity_type = models.CharField(max_length=20, choices=ENTITY_TYPE_CHOICES, default='voter')
+    source_id   = models.IntegerField(null=True, blank=True)
+    relation_label = models.CharField(max_length=200, blank=True)
 
     class Meta:
         ordering = ['voter_name']
@@ -47,6 +57,7 @@ class TelecallingAssignmentVoter(models.Model):
             models.Index(fields=['voter_name'], name='telecall_asgv_name_idx'),
             models.Index(fields=['assignment', 'voter'], name='telecall_asgv_asg_voter_idx'),
             models.Index(fields=['assignment', 'voter_name'], name='telecall_asgv_asg_name_idx'),
+            models.Index(fields=['entity_type', 'source_id'], name='telecall_asgv_entity_idx'),
         ]
 
     def __str__(self):

@@ -46,6 +46,93 @@ def _collect_phone_numbers(voter) -> set[str]:
     return numbers
 
 
+def _normalize_name(value) -> str:
+    return str(value or '').strip().lower()
+
+
+def _contact_key(name, phone) -> str:
+    normalized_name = _normalize_name(name)
+    normalized_phone = _normalize_phone(phone)
+    if not normalized_name or not normalized_phone:
+        return ''
+    return f'{normalized_name}::{normalized_phone}'
+
+
+def _contact_keys(name, phones) -> set[str]:
+    return {
+        key
+        for key in (_contact_key(name, phone) for phone in (phones or ()))
+        if key
+    }
+
+
+def _build_assignment_contact_lookups(phone_values: set[str]):
+    latest_any_by_key: Dict[str, dict] = {}
+    latest_nonvoter_by_key: Dict[str, dict] = {}
+    if not phone_values:
+        return latest_any_by_key, latest_nonvoter_by_key
+
+    assignment_qs = (
+        TelecallingAssignmentVoter.objects
+        .filter(phone__in=tuple(phone_values))
+        .select_related('assignment')
+        .order_by('-assignment__created_at', '-assignment_id', '-id')
+    )
+    for row in assignment_qs:
+        key = _contact_key(row.voter_name, row.phone)
+        if not key:
+            continue
+        info = {
+            'created_at': row.assignment.created_at,
+            'telecaller_id': row.assignment.telecaller_id,
+            'telecaller_name': row.assignment.telecaller_name or '',
+            'telecaller_phone': row.assignment.telecaller_phone or '',
+            'entity_type': row.entity_type or 'voter',
+        }
+        latest_any_by_key.setdefault(key, info)
+        if info['entity_type'] != 'voter':
+            latest_nonvoter_by_key.setdefault(key, info)
+
+    return latest_any_by_key, latest_nonvoter_by_key
+
+
+def _build_survey_contact_sets(phone_values: set[str]):
+    all_keys: set[str] = set()
+    nonvoter_keys: set[str] = set()
+    if not phone_values:
+        return all_keys, nonvoter_keys
+
+    survey_qs = (
+        FieldSurvey.objects
+        .filter(is_active=True, phone__in=tuple(phone_values))
+        .order_by('-survey_date', '-created_at', '-id')
+    )
+    for survey in survey_qs:
+        key = _contact_key(survey.voter_name, survey.phone)
+        if not key:
+            continue
+        all_keys.add(key)
+        if not survey.voter_id:
+            nonvoter_keys.add(key)
+
+    return all_keys, nonvoter_keys
+
+
+def _resolve_cross_status(contact_keys: set[str], assignment_lookup: Dict[str, dict], surveyed_keys: set[str]):
+    fallback_info = None
+    for key in contact_keys:
+        assignment_info = assignment_lookup.get(key)
+        if not assignment_info:
+            continue
+        if key in surveyed_keys:
+            return 'already_contacted', assignment_info
+        if fallback_info is None:
+            fallback_info = assignment_info
+    if fallback_info:
+        return 'already_assigned', fallback_info
+    return '', None
+
+
 def build_voter_status_map(voter_ids: Iterable[int]) -> Dict[int, dict]:
     """
     Compute current workflow state for each voter based on latest feedback and
@@ -62,7 +149,7 @@ def build_voter_status_map(voter_ids: Iterable[int]) -> Dict[int, dict]:
     current_voters = list(
         Voter.objects
         .filter(id__in=voter_id_set)
-        .only('id', 'booth_id', *PHONE_FIELDS)
+        .only('id', 'name', 'booth_id', *PHONE_FIELDS)
     )
     current_voter_ids = {voter.id for voter in current_voters}
     current_phone_values = {
@@ -70,6 +157,8 @@ def build_voter_status_map(voter_ids: Iterable[int]) -> Dict[int, dict]:
         for voter in current_voters
         for normalized in _collect_phone_numbers(voter)
     }
+    _, nonvoter_assignment_by_contact = _build_assignment_contact_lookups(current_phone_values)
+    _, nonvoter_survey_contact_keys = _build_survey_contact_sets(current_phone_values)
 
     related_voters = current_voters
     if current_phone_values:
@@ -85,6 +174,7 @@ def build_voter_status_map(voter_ids: Iterable[int]) -> Dict[int, dict]:
 
     voter_meta = {
         voter.id: {
+            'name': voter.name or '',
             'booth_id': voter.booth_id,
             'phones': _collect_phone_numbers(voter),
         }
@@ -241,6 +331,188 @@ def build_voter_status_map(voter_ids: Iterable[int]) -> Dict[int, dict]:
                 resolved['telecaller_name'] = related_assignment_info.get('telecaller_name', '') if related_assignment_info else ''
                 resolved['telecaller_phone'] = related_assignment_info.get('telecaller_phone', '') if related_assignment_info else ''
 
+        contact_keys = _contact_keys(current_meta.get('name'), current_meta.get('phones'))
+        cross_entity_status, cross_entity_info = _resolve_cross_status(
+            contact_keys,
+            nonvoter_assignment_by_contact,
+            nonvoter_survey_contact_keys,
+        )
+        if cross_entity_status and (
+            resolved['status'] == 'unassigned' or
+            (resolved['status'] == 'already_assigned' and cross_entity_status == 'already_contacted')
+        ):
+            resolved['status'] = cross_entity_status
+            resolved['label'] = WORKFLOW_LABELS[cross_entity_status]
+            resolved['is_locked'] = True
+            resolved['telecaller_id'] = cross_entity_info.get('telecaller_id') if cross_entity_info else None
+            resolved['telecaller_name'] = cross_entity_info.get('telecaller_name', '') if cross_entity_info else ''
+            resolved['telecaller_phone'] = cross_entity_info.get('telecaller_phone', '') if cross_entity_info else ''
+
         status_map[voter_id] = resolved
+
+    return status_map
+
+
+def build_nonvoter_status_map(entity_type: str, entries: Iterable[dict]) -> Dict[int, dict]:
+    """
+    Resolve assignment workflow states for volunteer / beneficiary telecalling rows.
+
+    Matching priority:
+      1. exact assignment row by (entity_type, source_id)
+      2. latest FieldSurvey by normalized name + phone
+      3. latest FieldSurvey by normalized name only (fallback when phone is blank)
+    """
+    normalized_type = (entity_type or '').strip().lower()
+    if normalized_type not in {'volunteer', 'beneficiary'}:
+        return {}
+
+    prepared_entries = []
+    source_ids: set[int] = set()
+    names: set[str] = set()
+    phone_values: set[str] = set()
+    for entry in entries:
+        source_id = entry.get('source_id')
+        if not source_id:
+            continue
+        display_name = str(entry.get('name') or '').strip()
+        normalized_name = _normalize_name(entry.get('name'))
+        phones = {
+            _normalize_phone(phone)
+            for phone in (entry.get('phones') or [])
+            if _normalize_phone(phone)
+        }
+        prepared_entries.append({
+            'source_id': int(source_id),
+            'display_name': display_name,
+            'name': normalized_name,
+            'phones': phones,
+        })
+        source_ids.add(int(source_id))
+        if normalized_name:
+            names.add(normalized_name)
+        phone_values.update(phones)
+
+    if not prepared_entries:
+        return {}
+
+    all_assignment_by_contact, _ = _build_assignment_contact_lookups(phone_values)
+    all_survey_contact_keys, _ = _build_survey_contact_sets(phone_values)
+
+    latest_assignment: Dict[int, dict] = {}
+    assignment_qs = (
+        TelecallingAssignmentVoter.objects
+        .filter(entity_type=normalized_type, source_id__in=source_ids)
+        .select_related('assignment')
+        .order_by('source_id', '-assignment__created_at', '-assignment_id', '-id')
+    )
+    for row in assignment_qs:
+        source_id = row.source_id
+        if source_id and source_id not in latest_assignment:
+            latest_assignment[source_id] = {
+                'created_at': row.assignment.created_at,
+                'telecaller_id': row.assignment.telecaller_id,
+                'telecaller_name': row.assignment.telecaller_name or '',
+                'telecaller_phone': row.assignment.telecaller_phone or '',
+                'name': _normalize_name(row.voter_name),
+                'phones': {
+                    _normalize_phone(phone)
+                    for phone in (row.phone, getattr(getattr(row, 'voter', None), 'phone2', ''))
+                    if _normalize_phone(phone)
+                },
+            }
+
+    survey_by_name_phone = {}
+    survey_by_name = {}
+    if names:
+        survey_qs = (
+            FieldSurvey.objects
+            .filter(is_active=True, voter__isnull=True, voter_name__in=[entry.get('display_name', '') for entry in prepared_entries if entry.get('display_name')])
+            .order_by('-survey_date', '-created_at', '-id')
+        )
+        for survey in survey_qs:
+            normalized_name = _normalize_name(survey.voter_name)
+            if not normalized_name:
+                continue
+            normalized_phone = _normalize_phone(survey.phone)
+            if normalized_phone:
+                survey_by_name_phone.setdefault(f'{normalized_name}::{normalized_phone}', survey)
+            survey_by_name.setdefault(normalized_name, survey)
+
+    matched_surveys_by_source: Dict[int, object] = {}
+    for entry in prepared_entries:
+        matched_survey = None
+        for phone in entry['phones']:
+            matched_survey = survey_by_name_phone.get(f"{entry['name']}::{phone}")
+            if matched_survey:
+                break
+        if not matched_survey and entry['name']:
+            matched_survey = survey_by_name.get(entry['name'])
+        if matched_survey:
+            matched_surveys_by_source[entry['source_id']] = matched_survey
+
+    latest_feedback: Dict[int, object] = {}
+    matched_survey_ids = {survey.id for survey in matched_surveys_by_source.values() if getattr(survey, 'id', None)}
+    if matched_survey_ids:
+        feedback_qs = (
+            TelecallingFeedback.objects
+            .filter(is_active=True, survey_id__in=matched_survey_ids)
+            .select_related('survey')
+            .order_by('survey_id', '-date', '-created_at', '-id')
+        )
+        for feedback in feedback_qs:
+            if feedback.survey_id and feedback.survey_id not in latest_feedback:
+                latest_feedback[feedback.survey_id] = feedback
+
+    status_map: Dict[int, dict] = {}
+    for entry in prepared_entries:
+        source_id = entry['source_id']
+        assignment_info = latest_assignment.get(source_id, {})
+        feedback = None
+        matched_survey = matched_surveys_by_source.get(source_id)
+        if matched_survey:
+            feedback = latest_feedback.get(matched_survey.id)
+
+        if not assignment_info:
+            status = 'unassigned'
+            is_locked = False
+        elif not feedback:
+            status = 'assigned'
+            is_locked = True
+        elif feedback.action == 'followup_not_required':
+            status = 'completed'
+            is_locked = True
+        elif feedback.followup_type == 'field_survey':
+            status = 'pending_field_survey'
+            is_locked = True
+        else:
+            latest_assignment_ts = assignment_info.get('created_at')
+            feedback_ts = feedback.created_at
+            if latest_assignment_ts and feedback_ts and latest_assignment_ts > feedback_ts:
+                status = 'reassigned'
+                is_locked = True
+            else:
+                status = 'pending_followup'
+                is_locked = False
+
+        if status == 'unassigned':
+            contact_keys = _contact_keys(entry['display_name'], entry['phones'])
+            cross_status, cross_assignment_info = _resolve_cross_status(
+                contact_keys,
+                all_assignment_by_contact,
+                all_survey_contact_keys,
+            )
+            if cross_status:
+                status = cross_status
+                is_locked = True
+                assignment_info = cross_assignment_info or {}
+
+        status_map[source_id] = {
+            'status': status,
+            'label': WORKFLOW_LABELS.get(status, status.replace('_', ' ').title()),
+            'is_locked': is_locked,
+            'telecaller_id': assignment_info.get('telecaller_id'),
+            'telecaller_name': assignment_info.get('telecaller_name', ''),
+            'telecaller_phone': assignment_info.get('telecaller_phone', ''),
+        }
 
     return status_map

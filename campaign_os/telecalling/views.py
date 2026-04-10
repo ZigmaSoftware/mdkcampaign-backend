@@ -19,12 +19,14 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from campaign_os.activities.models import ActivityLog, FieldSurvey
+from campaign_os.beneficiaries.models import Beneficiary
 from campaign_os.core.permissions import ScreenPermission
 from campaign_os.masters.models import Booth
+from campaign_os.volunteers.models import Volunteer
 
 from .models import TelecallingAssignment, TelecallingAssignmentVoter, TelecallingFeedback
 from .serializers import TelecallingAssignmentSerializer, TelecallingFeedbackSerializer
-from .workflow import WORKFLOW_LABELS, build_voter_status_map
+from .workflow import WORKFLOW_LABELS, build_nonvoter_status_map, build_voter_status_map
 
 
 SURVEY_ID_PATTERN = re.compile(r'\[survey_id:(\d+)\]')
@@ -404,6 +406,166 @@ class TelecallingAssignmentViewSet(viewsets.ModelViewSet):
         ctx['voter_status_map'] = build_voter_status_map(voter_ids)
         return ctx
 
+    @action(detail=False, methods=['get'], url_path='assignable-people')
+    def assignable_people(self, request):
+        category = (request.query_params.get('category') or '').strip().lower()
+        search = (request.query_params.get('search') or '').strip()
+        workflow_status = (request.query_params.get('workflow_status') or '').strip().lower()
+        contact_status = (request.query_params.get('contact_status') or '').strip().lower()
+
+        if category not in {'volunteer', 'beneficiary'}:
+            return Response(
+                {'detail': 'category must be volunteer or beneficiary'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if category == 'volunteer':
+            role_value = (request.query_params.get('role') or '').strip()
+            queryset = Volunteer.objects.filter(is_active=True).select_related('user', 'booth', 'volunteer_role')
+
+            if role_value:
+                queryset = queryset.filter(
+                    Q(role__iexact=role_value) |
+                    Q(volunteer_role__name__iexact=role_value)
+                )
+
+            if search:
+                queryset = queryset.filter(
+                    Q(name__icontains=search) |
+                    Q(phone__icontains=search) |
+                    Q(phone2__icontains=search) |
+                    Q(voter_id__icontains=search) |
+                    Q(role__icontains=search) |
+                    Q(volunteer_role__name__icontains=search) |
+                    Q(booth__name__icontains=search) |
+                    Q(booth__number__icontains=search)
+                )
+
+            if contact_status == 'with':
+                queryset = queryset.exclude(
+                    (Q(phone__isnull=True) | Q(phone__exact='')) &
+                    (Q(phone2__isnull=True) | Q(phone2__exact=''))
+                )
+            elif contact_status == 'without':
+                queryset = queryset.filter(
+                    Q(phone__isnull=True) | Q(phone__exact='')
+                ).filter(
+                    Q(phone2__isnull=True) | Q(phone2__exact='')
+                )
+
+            raw_rows = []
+            for volunteer in queryset.order_by('name', 'id'):
+                role_label = getattr(getattr(volunteer, 'volunteer_role', None), 'name', '') or volunteer.role or ''
+                raw_rows.append({
+                    'id': volunteer.id,
+                    'source_id': volunteer.id,
+                    'name': volunteer.name or (volunteer.user.get_full_name() if volunteer.user_id else f'Volunteer #{volunteer.id}'),
+                    'voter_id': volunteer.voter_id or '',
+                    'phone': volunteer.phone or '',
+                    'phone2': volunteer.phone2 or '',
+                    'alt_phoneno2': '',
+                    'alt_phoneno3': '',
+                    'address': '',
+                    'booth': volunteer.booth_id or 0,
+                    'booth_no': getattr(getattr(volunteer, 'booth', None), 'number', '') or '',
+                    'booth_name': getattr(getattr(volunteer, 'booth', None), 'name', '') or '',
+                    'age': volunteer.age,
+                    'gender': volunteer.gender or '',
+                    'relation_label': role_label,
+                    'entity_type': 'volunteer',
+                    'phones': [volunteer.phone or '', volunteer.phone2 or ''],
+                })
+        else:
+            scheme_value = (request.query_params.get('scheme') or '').strip()
+            queryset = Beneficiary.objects.filter(is_active=True).select_related('booth', 'scheme')
+
+            if scheme_value:
+                queryset = queryset.filter(
+                    Q(scheme__name__iexact=scheme_value) |
+                    Q(scheme_name__iexact=scheme_value)
+                )
+
+            if search:
+                queryset = queryset.filter(
+                    Q(name__icontains=search) |
+                    Q(voter_id__icontains=search) |
+                    Q(phone__icontains=search) |
+                    Q(phone2__icontains=search) |
+                    Q(address__icontains=search) |
+                    Q(booth__name__icontains=search) |
+                    Q(booth__number__icontains=search) |
+                    Q(scheme__name__icontains=search) |
+                    Q(scheme_name__icontains=search)
+                )
+
+            if contact_status == 'with':
+                queryset = queryset.exclude(
+                    (Q(phone__isnull=True) | Q(phone__exact='')) &
+                    (Q(phone2__isnull=True) | Q(phone2__exact=''))
+                )
+            elif contact_status == 'without':
+                queryset = queryset.filter(
+                    Q(phone__isnull=True) | Q(phone__exact='')
+                ).filter(
+                    Q(phone2__isnull=True) | Q(phone2__exact='')
+                )
+
+            raw_rows = []
+            for beneficiary in queryset.order_by('name', 'id'):
+                scheme_label = getattr(getattr(beneficiary, 'scheme', None), 'name', '') or beneficiary.scheme_name or ''
+                raw_rows.append({
+                    'id': beneficiary.id,
+                    'source_id': beneficiary.id,
+                    'name': beneficiary.name or f'Beneficiary #{beneficiary.id}',
+                    'voter_id': beneficiary.voter_id or '',
+                    'phone': beneficiary.phone or '',
+                    'phone2': beneficiary.phone2 or '',
+                    'alt_phoneno2': '',
+                    'alt_phoneno3': '',
+                    'address': beneficiary.address or '',
+                    'booth': beneficiary.booth_id or 0,
+                    'booth_no': getattr(getattr(beneficiary, 'booth', None), 'number', '') or '',
+                    'booth_name': getattr(getattr(beneficiary, 'booth', None), 'name', '') or '',
+                    'age': beneficiary.age,
+                    'gender': beneficiary.gender or '',
+                    'relation_label': scheme_label,
+                    'entity_type': 'beneficiary',
+                    'phones': [beneficiary.phone or '', beneficiary.phone2 or ''],
+                })
+
+        status_map = build_nonvoter_status_map(category, raw_rows)
+        workflow_summary = {}
+        for row in raw_rows:
+            status_info = status_map.get(row['source_id'], {
+                'status': 'unassigned',
+                'label': WORKFLOW_LABELS['unassigned'],
+                'is_locked': False,
+                'telecaller_name': '',
+                'telecaller_phone': '',
+            })
+            row['workflow_status'] = status_info['status']
+            row['workflow_label'] = status_info['label']
+            row['is_locked'] = status_info['is_locked']
+            row['assigned_telecaller_name'] = status_info.get('telecaller_name', '')
+            row['assigned_telecaller_phone'] = status_info.get('telecaller_phone', '')
+            workflow_summary[row['workflow_status']] = workflow_summary.get(row['workflow_status'], 0) + 1
+
+        raw_count = len(raw_rows)
+        filtered_rows = raw_rows
+        if workflow_status:
+            filtered_rows = [row for row in raw_rows if row.get('workflow_status') == workflow_status]
+
+        page = self.paginate_queryset(filtered_rows)
+        payload = list(page) if page is not None else filtered_rows
+        response = (
+            self.get_paginated_response(payload)
+            if page is not None
+            else Response({'count': len(payload), 'next': None, 'previous': None, 'results': payload})
+        )
+        response.data['raw_count'] = raw_count
+        response.data['workflow_summary'] = workflow_summary
+        return response
+
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
         assignment_time = (request.query_params.get('assignment_time') or '').strip()
@@ -557,6 +719,9 @@ class TelecallingAssignmentViewSet(viewsets.ModelViewSet):
                 'assignment_id': voter.assignment_id,
                 'id': voter.id,
                 'voter': voter.voter_id,
+                'source_id': voter.source_id or voter.voter_id,
+                'entity_type': voter.entity_type or 'voter',
+                'relation_label': voter.relation_label or '',
                 'voter_name': voter.voter_name or '',
                 'voter_id_no': voter.voter_id_no or '',
                 'phone': voter.phone or '',
@@ -565,7 +730,7 @@ class TelecallingAssignmentViewSet(viewsets.ModelViewSet):
                 'alt_phoneno3': getattr(getattr(voter, 'voter', None), 'alt_phoneno3', '') or '',
                 'address': voter.address or '',
                 'booth_name': voter.booth_name or '',
-                'booth_no': getattr(getattr(voter, 'voter', None), 'booth', None).number if getattr(getattr(voter, 'voter', None), 'booth', None) else '',
+                'booth_no': voter.booth_no or (getattr(getattr(voter, 'voter', None), 'booth', None).number if getattr(getattr(voter, 'voter', None), 'booth', None) else ''),
                 'age': voter.age,
                 'gender': voter.gender or '',
                 'telecaller_id': assignment.get('telecaller_id'),
@@ -785,6 +950,12 @@ class TelecallingFeedbackViewSet(viewsets.ModelViewSet):
         party = (request.query_params.get('party') or '').strip()
         if party:
             scoped_surveys = scoped_surveys.filter(party_preference=party)
+
+        remarks_filter = (request.query_params.get('remarks') or '').strip().lower()
+        if remarks_filter == 'commented':
+            scoped_surveys = scoped_surveys.exclude(Q(remarks__isnull=True) | Q(remarks__exact=''))
+        elif remarks_filter == 'uncommented':
+            scoped_surveys = scoped_surveys.filter(Q(remarks__isnull=True) | Q(remarks__exact=''))
 
         booth = (request.query_params.get('booth') or '').strip()
         if booth:
