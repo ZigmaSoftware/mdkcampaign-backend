@@ -30,19 +30,6 @@ from .workflow import WORKFLOW_LABELS, build_nonvoter_status_map, build_voter_st
 
 
 SURVEY_ID_PATTERN = re.compile(r'\[survey_id:(\d+)\]')
-NON_DIGIT_RE = re.compile(r'\D+')
-
-
-WORKFLOW_PRIORITY = {
-    'already_contacted': 80,
-    'completed': 70,
-    'pending_field_survey': 60,
-    'pending_followup': 50,
-    'reassigned': 45,
-    'assigned': 40,
-    'already_assigned': 30,
-    'unassigned': 10,
-}
 
 
 def _assignment_time_value(assignment):
@@ -55,87 +42,6 @@ def _assignment_time_label(assignment):
     if not assignment.created_at:
         return ''
     return timezone.localtime(assignment.created_at).strftime('%Y-%m-%d %H:%M:%S')
-
-
-def _normalize_contact_phone(value):
-    raw = str(value or '').strip()
-    if not raw:
-        return ''
-    digits = NON_DIGIT_RE.sub('', raw)
-    if len(digits) > 10:
-        digits = digits[-10:]
-    return digits
-
-
-def _assignable_person_dedupe_key(row):
-    normalized_name = str(row.get('name') or '').strip().lower()
-    normalized_voter_id = str(row.get('voter_id') or '').strip().lower()
-    normalized_phones = tuple(sorted({
-        phone
-        for phone in (
-            _normalize_contact_phone(row.get('phone')),
-            _normalize_contact_phone(row.get('phone2')),
-            _normalize_contact_phone(row.get('alt_phoneno2')),
-            _normalize_contact_phone(row.get('alt_phoneno3')),
-        )
-        if phone
-    }))
-
-    if not normalized_name and not normalized_voter_id and not normalized_phones:
-        return ('source', row.get('entity_type') or '', row.get('source_id') or row.get('id'))
-
-    return (
-        row.get('entity_type') or '',
-        normalized_name,
-        normalized_voter_id,
-        normalized_phones,
-    )
-
-
-def _merge_assignable_row(existing, candidate):
-    existing_priority = WORKFLOW_PRIORITY.get(existing.get('workflow_status') or '', 0)
-    candidate_priority = WORKFLOW_PRIORITY.get(candidate.get('workflow_status') or '', 0)
-    winner = candidate if candidate_priority > existing_priority else existing
-    merged = dict(winner)
-
-    for field in (
-        'phone', 'phone2', 'alt_phoneno2', 'alt_phoneno3', 'address', 'booth_no',
-        'booth_name', 'relation_label', 'assigned_telecaller_name', 'assigned_telecaller_phone',
-    ):
-        if not merged.get(field):
-            merged[field] = existing.get(field) or candidate.get(field) or ''
-
-    if merged.get('booth') in {None, 0, ''}:
-        merged['booth'] = existing.get('booth') or candidate.get('booth') or 0
-
-    if merged.get('age') in {None, ''}:
-        merged['age'] = existing.get('age') if existing.get('age') not in {None, ''} else candidate.get('age')
-
-    if not merged.get('gender'):
-        merged['gender'] = existing.get('gender') or candidate.get('gender') or ''
-
-    return merged
-
-
-def _dedupe_assignable_rows(rows):
-    deduped_rows = []
-    dedupe_index = {}
-
-    for row in rows:
-        dedupe_key = _assignable_person_dedupe_key(row)
-        existing_index = dedupe_index.get(dedupe_key)
-        if existing_index is None:
-            dedupe_index[dedupe_key] = len(deduped_rows)
-            deduped_rows.append(dict(row))
-            continue
-        deduped_rows[existing_index] = _merge_assignable_row(deduped_rows[existing_index], row)
-
-    workflow_summary = {}
-    for row in deduped_rows:
-        workflow_status = row.get('workflow_status') or 'unassigned'
-        workflow_summary[workflow_status] = workflow_summary.get(workflow_status, 0) + 1
-
-    return deduped_rows, workflow_summary
 
 
 def _serialize_field_survey_record(survey):
@@ -642,12 +548,12 @@ class TelecallingAssignmentViewSet(viewsets.ModelViewSet):
             row['is_locked'] = status_info['is_locked']
             row['assigned_telecaller_name'] = status_info.get('telecaller_name', '')
             row['assigned_telecaller_phone'] = status_info.get('telecaller_phone', '')
+            workflow_summary[row['workflow_status']] = workflow_summary.get(row['workflow_status'], 0) + 1
 
-        deduped_rows, workflow_summary = _dedupe_assignable_rows(raw_rows)
-        raw_count = len(deduped_rows)
-        filtered_rows = deduped_rows
+        raw_count = len(raw_rows)
+        filtered_rows = raw_rows
         if workflow_status:
-            filtered_rows = [row for row in deduped_rows if row.get('workflow_status') == workflow_status]
+            filtered_rows = [row for row in raw_rows if row.get('workflow_status') == workflow_status]
 
         page = self.paginate_queryset(filtered_rows)
         payload = list(page) if page is not None else filtered_rows
