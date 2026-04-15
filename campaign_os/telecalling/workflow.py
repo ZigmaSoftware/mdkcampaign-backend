@@ -66,22 +66,33 @@ def _contact_keys(name, phones) -> set[str]:
     }
 
 
-def _build_assignment_contact_lookups(phone_values: set[str]):
+def _name_filter(field_name: str, names: set[str]) -> Q:
+    query = Q()
+    for name in names:
+        if name:
+            query |= Q(**{f'{field_name}__iexact': name})
+    return query
+
+
+def _build_assignment_contact_lookups(phone_values: set[str], names: set[str] | None = None):
     latest_any_by_key: Dict[str, dict] = {}
     latest_nonvoter_by_key: Dict[str, dict] = {}
-    if not phone_values:
+    normalized_names = {name for name in (names or set()) if name}
+    if not phone_values and not normalized_names:
         return latest_any_by_key, latest_nonvoter_by_key
+
+    assignment_filter = Q()
+    if phone_values:
+        assignment_filter |= Q(phone__in=tuple(phone_values))
+    assignment_filter |= _name_filter('voter_name', normalized_names)
 
     assignment_qs = (
         TelecallingAssignmentVoter.objects
-        .filter(phone__in=tuple(phone_values))
-        .select_related('assignment')
+        .filter(assignment_filter)
+        .select_related('assignment', 'voter')
         .order_by('-assignment__created_at', '-assignment_id', '-id')
     )
     for row in assignment_qs:
-        key = _contact_key(row.voter_name, row.phone)
-        if not key:
-            continue
         info = {
             'created_at': row.assignment.created_at,
             'telecaller_id': row.assignment.telecaller_id,
@@ -89,31 +100,46 @@ def _build_assignment_contact_lookups(phone_values: set[str]):
             'telecaller_phone': row.assignment.telecaller_phone or '',
             'entity_type': row.entity_type or 'voter',
         }
-        latest_any_by_key.setdefault(key, info)
-        if info['entity_type'] != 'voter':
-            latest_nonvoter_by_key.setdefault(key, info)
+        row_phones = {row.phone or ''}
+        voter = getattr(row, 'voter', None)
+        if voter:
+            row_phones.update(getattr(voter, field, '') or '' for field in PHONE_FIELDS)
+        for key in _contact_keys(row.voter_name, row_phones):
+            latest_any_by_key.setdefault(key, info)
+            if info['entity_type'] != 'voter':
+                latest_nonvoter_by_key.setdefault(key, info)
 
     return latest_any_by_key, latest_nonvoter_by_key
 
 
-def _build_survey_contact_sets(phone_values: set[str]):
+def _build_survey_contact_sets(phone_values: set[str], names: set[str] | None = None):
     all_keys: set[str] = set()
     nonvoter_keys: set[str] = set()
-    if not phone_values:
+    normalized_names = {name for name in (names or set()) if name}
+    if not phone_values and not normalized_names:
         return all_keys, nonvoter_keys
+
+    survey_filter = Q()
+    if phone_values:
+        survey_filter |= Q(phone__in=tuple(phone_values))
+    survey_filter |= _name_filter('voter_name', normalized_names)
 
     survey_qs = (
         FieldSurvey.objects
-        .filter(is_active=True, phone__in=tuple(phone_values))
+        .filter(is_active=True)
+        .filter(survey_filter)
+        .select_related('voter')
         .order_by('-survey_date', '-created_at', '-id')
     )
     for survey in survey_qs:
-        key = _contact_key(survey.voter_name, survey.phone)
-        if not key:
-            continue
-        all_keys.add(key)
-        if not survey.voter_id:
-            nonvoter_keys.add(key)
+        survey_phones = {survey.phone or ''}
+        voter = getattr(survey, 'voter', None)
+        if voter:
+            survey_phones.update(getattr(voter, field, '') or '' for field in PHONE_FIELDS)
+        for key in _contact_keys(survey.voter_name, survey_phones):
+            all_keys.add(key)
+            if not survey.voter_id:
+                nonvoter_keys.add(key)
 
     return all_keys, nonvoter_keys
 
@@ -157,8 +183,9 @@ def build_voter_status_map(voter_ids: Iterable[int]) -> Dict[int, dict]:
         for voter in current_voters
         for normalized in _collect_phone_numbers(voter)
     }
-    _, nonvoter_assignment_by_contact = _build_assignment_contact_lookups(current_phone_values)
-    _, nonvoter_survey_contact_keys = _build_survey_contact_sets(current_phone_values)
+    current_name_values = {_normalize_name(voter.name) for voter in current_voters if _normalize_name(voter.name)}
+    _, nonvoter_assignment_by_contact = _build_assignment_contact_lookups(current_phone_values, current_name_values)
+    _, nonvoter_survey_contact_keys = _build_survey_contact_sets(current_phone_values, current_name_values)
 
     related_voters = current_voters
     if current_phone_values:
@@ -395,8 +422,8 @@ def build_nonvoter_status_map(entity_type: str, entries: Iterable[dict]) -> Dict
     if not prepared_entries:
         return {}
 
-    all_assignment_by_contact, _ = _build_assignment_contact_lookups(phone_values)
-    all_survey_contact_keys, _ = _build_survey_contact_sets(phone_values)
+    all_assignment_by_contact, _ = _build_assignment_contact_lookups(phone_values, names)
+    all_survey_contact_keys, _ = _build_survey_contact_sets(phone_values, names)
 
     latest_assignment: Dict[int, dict] = {}
     assignment_qs = (
