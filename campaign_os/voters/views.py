@@ -161,19 +161,35 @@ class VoterViewSet(viewsets.ModelViewSet):
         include_workflow = (request.query_params.get('include_workflow') or '').strip().lower() in {'1', 'true', 'yes'}
         include_summary = (request.query_params.get('include_summary') or '').strip().lower() in {'1', 'true', 'yes'}
         workflow_status = (request.query_params.get('workflow_status') or '').strip().lower()
+        telecaller_filter = (request.query_params.get('telecaller') or '').strip()
 
         voter_status_map = {}
         workflow_summary = {}
         raw_count = None
         all_voter_ids = []
+        needs_full_workflow_scope = bool(workflow_status or include_summary or telecaller_filter)
 
-        if include_workflow or workflow_status:
+        if include_workflow or workflow_status or telecaller_filter:
             # Resolve status map for the full queryset only when the caller explicitly
             # requests summary counts or applies workflow_status filtering.
-            if workflow_status or include_summary:
+            if needs_full_workflow_scope:
                 all_voter_ids = list(queryset.values_list('id', flat=True))
                 raw_count = len(all_voter_ids)
                 voter_status_map = build_voter_status_map(all_voter_ids)
+
+                if telecaller_filter:
+                    telecaller_filter_normalized = telecaller_filter.lower()
+                    matching_ids = [
+                        voter_id for voter_id in all_voter_ids
+                        if (
+                            str(voter_status_map.get(voter_id, {}).get('telecaller_id') or '') == telecaller_filter
+                            or (
+                                telecaller_filter_normalized
+                                and (voter_status_map.get(voter_id, {}).get('telecaller_name') or '').strip().lower() == telecaller_filter_normalized
+                            )
+                        )
+                    ]
+                    queryset = queryset.filter(id__in=matching_ids)
 
                 if workflow_status:
                     matching_ids = [
@@ -192,7 +208,7 @@ class VoterViewSet(viewsets.ModelViewSet):
         page = self.paginate_queryset(queryset)
         objects = list(page) if page is not None else list(queryset)
         page_status_map = voter_status_map
-        if include_workflow or workflow_status:
+        if include_workflow or workflow_status or telecaller_filter:
             object_ids = [obj.id for obj in objects]
             if voter_status_map:
                 page_status_map = {voter_id: voter_status_map.get(voter_id, {}) for voter_id in object_ids}
@@ -208,14 +224,14 @@ class VoterViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(objects, many=True, context={**self.get_serializer_context(), 'voter_status_map': page_status_map})
         if page is not None:
             response = self.get_paginated_response(serializer.data)
-            if include_workflow or workflow_status:
+            if include_workflow or workflow_status or telecaller_filter:
                 response.data['workflow_summary'] = workflow_summary
                 if raw_count is not None:
                     response.data['raw_count'] = raw_count
             return response
 
         payload = {'results': serializer.data, 'count': len(serializer.data)}
-        if include_workflow or workflow_status:
+        if include_workflow or workflow_status or telecaller_filter:
             payload['workflow_summary'] = workflow_summary
             if raw_count is not None:
                 payload['raw_count'] = raw_count

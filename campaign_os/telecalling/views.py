@@ -242,6 +242,116 @@ def _booth_location_map_for_numbers(booth_numbers):
     return booth_map
 
 
+def _normalize_assignable_text(value):
+    return ' '.join(str(value or '').strip().lower().split())
+
+
+def _normalize_assignable_phone(value):
+    digits = re.sub(r'\D+', '', str(value or '').strip())
+    if not digits:
+        return ''
+    return digits[-10:] if len(digits) > 10 else digits
+
+
+_ASSIGNABLE_STATUS_PRIORITY = {
+    'unassigned': 0,
+    'already_assigned': 1,
+    'assigned': 2,
+    'reassigned': 3,
+    'pending_followup': 4,
+    'pending_field_survey': 5,
+    'already_contacted': 6,
+    'completed': 7,
+}
+
+
+def _merge_phone_fields(target, candidate):
+    ordered_values = []
+    seen = set()
+    for row in (target, candidate):
+        for field_name in ('phone', 'phone2', 'alt_phoneno2', 'alt_phoneno3'):
+            raw_value = str(row.get(field_name) or '').strip()
+            normalized = _normalize_assignable_phone(raw_value)
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            ordered_values.append(raw_value or normalized)
+
+    for index, field_name in enumerate(('phone', 'phone2', 'alt_phoneno2', 'alt_phoneno3')):
+        target[field_name] = ordered_values[index] if index < len(ordered_values) else ''
+    target['phones'] = ordered_values[:2]
+
+
+def _merge_assignable_row(grouped_row, candidate_row):
+    _merge_phone_fields(grouped_row, candidate_row)
+
+    for field_name in ('name', 'voter_id', 'address', 'booth_no', 'booth_name', 'relation_label', 'gender'):
+        if not grouped_row.get(field_name) and candidate_row.get(field_name):
+            grouped_row[field_name] = candidate_row.get(field_name)
+
+    if not grouped_row.get('booth') and candidate_row.get('booth'):
+        grouped_row['booth'] = candidate_row.get('booth')
+    if grouped_row.get('age') in (None, '') and candidate_row.get('age') not in (None, ''):
+        grouped_row['age'] = candidate_row.get('age')
+
+    current_status = grouped_row.get('workflow_status', 'unassigned')
+    candidate_status = candidate_row.get('workflow_status', 'unassigned')
+    if _ASSIGNABLE_STATUS_PRIORITY.get(candidate_status, 0) > _ASSIGNABLE_STATUS_PRIORITY.get(current_status, 0):
+        for field_name in (
+            'workflow_status',
+            'workflow_label',
+            'is_locked',
+            'telecaller_id',
+            'assigned_telecaller_name',
+            'assigned_telecaller_phone',
+        ):
+            grouped_row[field_name] = candidate_row.get(field_name)
+    else:
+        for field_name in ('telecaller_id', 'assigned_telecaller_name', 'assigned_telecaller_phone'):
+            if not grouped_row.get(field_name) and candidate_row.get(field_name):
+                grouped_row[field_name] = candidate_row.get(field_name)
+
+
+def _dedupe_assignable_rows(rows):
+    grouped = {}
+    ordered_keys = []
+
+    for row in rows:
+        entity_type = (row.get('entity_type') or '').strip().lower()
+        voter_id_key = _normalize_assignable_text(row.get('voter_id'))
+        name_key = _normalize_assignable_text(row.get('name'))
+        phone_key = tuple(sorted({
+            _normalize_assignable_phone(row.get('phone')),
+            _normalize_assignable_phone(row.get('phone2')),
+            _normalize_assignable_phone(row.get('alt_phoneno2')),
+            _normalize_assignable_phone(row.get('alt_phoneno3')),
+        } - {''}))
+
+        if voter_id_key:
+            dedupe_key = (entity_type, 'voter_id', voter_id_key)
+        elif name_key and phone_key:
+            dedupe_key = (entity_type, 'name_phone', name_key, phone_key)
+        else:
+            dedupe_key = (entity_type, 'source', row.get('source_id') or row.get('id'))
+
+        if dedupe_key not in grouped:
+            grouped[dedupe_key] = dict(row)
+            ordered_keys.append(dedupe_key)
+            continue
+
+        _merge_assignable_row(grouped[dedupe_key], row)
+
+    return [grouped[key] for key in ordered_keys]
+
+
+def _workflow_summary_from_rows(rows):
+    summary = {}
+    for row in rows:
+        status_key = row.get('workflow_status') or 'unassigned'
+        summary[status_key] = summary.get(status_key, 0) + 1
+    return summary
+
+
 def _latest_feedback_for_surveys(surveys_queryset):
     survey_ids = surveys_queryset.order_by().values('id')
     return (
@@ -412,6 +522,7 @@ class TelecallingAssignmentViewSet(viewsets.ModelViewSet):
         search = (request.query_params.get('search') or '').strip()
         workflow_status = (request.query_params.get('workflow_status') or '').strip().lower()
         contact_status = (request.query_params.get('contact_status') or '').strip().lower()
+        telecaller_filter = (request.query_params.get('telecaller') or '').strip()
         include_summary = (request.query_params.get('include_summary') or '').strip().lower() in {'1', 'true', 'yes'}
 
         if category not in {'volunteer', 'beneficiary'}:
@@ -478,6 +589,7 @@ class TelecallingAssignmentViewSet(viewsets.ModelViewSet):
                 row['workflow_status'] = status_info['status']
                 row['workflow_label'] = status_info['label']
                 row['is_locked'] = status_info['is_locked']
+                row['telecaller_id'] = status_info.get('telecaller_id')
                 row['assigned_telecaller_name'] = status_info.get('telecaller_name', '')
                 row['assigned_telecaller_phone'] = status_info.get('telecaller_phone', '')
                 workflow_summary[row['workflow_status']] = workflow_summary.get(row['workflow_status'], 0) + 1
@@ -551,37 +663,30 @@ class TelecallingAssignmentViewSet(viewsets.ModelViewSet):
                     Q(phone2__isnull=True) | Q(phone2__exact='')
                 )
 
-        # Fast path: paginate DB rows first and compute workflow only for this page.
-        if not workflow_status and not include_summary:
-            ordered_queryset = queryset.order_by('name', 'id')
-            raw_count = ordered_queryset.count()
-            page = self.paginate_queryset(ordered_queryset)
-            objects = list(page) if page is not None else list(ordered_queryset)
-            payload = [
-                serialize_volunteer(obj) if category == 'volunteer' else serialize_beneficiary(obj)
-                for obj in objects
-            ]
-            workflow_summary = hydrate_rows_with_status(payload)
-            response = (
-                self.get_paginated_response(payload)
-                if page is not None
-                else Response({'count': len(payload), 'next': None, 'previous': None, 'results': payload})
-            )
-            response.data['raw_count'] = raw_count
-            response.data['workflow_summary'] = workflow_summary
-            return response
-
-        # Fallback path for workflow filtering / full summary requests.
         raw_rows = [
             serialize_volunteer(obj) if category == 'volunteer' else serialize_beneficiary(obj)
             for obj in queryset.order_by('name', 'id')
         ]
-        workflow_summary = hydrate_rows_with_status(raw_rows)
+        hydrate_rows_with_status(raw_rows)
+        deduped_rows = _dedupe_assignable_rows(raw_rows)
 
-        raw_count = len(raw_rows)
-        filtered_rows = raw_rows
+        raw_count = len(deduped_rows)
+        workflow_summary = _workflow_summary_from_rows(deduped_rows)
+        filtered_rows = deduped_rows
+        if telecaller_filter:
+            telecaller_filter_normalized = telecaller_filter.lower()
+            filtered_rows = [
+                row for row in filtered_rows
+                if (
+                    str((row.get('telecaller_id') or '')) == telecaller_filter
+                    or (
+                        telecaller_filter_normalized
+                        and str(row.get('assigned_telecaller_name') or '').strip().lower() == telecaller_filter_normalized
+                    )
+                )
+            ]
         if workflow_status:
-            filtered_rows = [row for row in raw_rows if row.get('workflow_status') == workflow_status]
+            filtered_rows = [row for row in filtered_rows if row.get('workflow_status') == workflow_status]
 
         page = self.paginate_queryset(filtered_rows)
         payload = list(page) if page is not None else filtered_rows
