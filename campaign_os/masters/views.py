@@ -27,6 +27,14 @@ from campaign_os.core.utils.bulk_upload import (
 from campaign_os.core.permissions import ScreenPermission
 
 
+def _lookup_limit(request, default=20, max_limit=200):
+    try:
+        limit = int(request.query_params.get('limit', default))
+    except (TypeError, ValueError):
+        limit = default
+    return max(1, min(limit, max_limit))
+
+
 class CountryViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Country.objects.all()
     serializer_class = CountrySerializer
@@ -130,6 +138,25 @@ class WardViewSet(viewsets.ModelViewSet):
 
     def get_serializer_class(self):
         return WardDetailSerializer if self.action == 'retrieve' else WardSimpleSerializer
+
+    @action(detail=False, methods=['GET'], url_path='lookup')
+    def lookup(self, request):
+        search = request.query_params.get('search', '').strip()
+        limit = _lookup_limit(request)
+
+        qs = self.get_queryset()
+        if search:
+            qs = qs.filter(Q(name__icontains=search) | Q(code__icontains=search))
+
+        total = qs.count()
+        rows = qs.order_by('name').values('id', 'name', 'code')[:limit]
+        return Response({
+            'count': total,
+            'results': [
+                {'id': row['id'], 'name': row['name'], 'code': row.get('code') or ''}
+                for row in rows
+            ],
+        })
 
     @action(detail=True, methods=['GET'])
     def booths(self, request, pk=None):
@@ -294,6 +321,33 @@ class PartyViewSet(viewsets.ModelViewSet):
     search_fields = ['name', 'code', 'abbreviation']
     ordering = ['name']
 
+    @action(detail=False, methods=['GET'], url_path='lookup')
+    def lookup(self, request):
+        search = request.query_params.get('search', '').strip()
+        limit = _lookup_limit(request)
+
+        qs = self.get_queryset()
+        if search:
+            qs = qs.filter(
+                Q(name__icontains=search) |
+                Q(code__icontains=search) |
+                Q(abbreviation__icontains=search)
+            )
+
+        total = qs.count()
+        rows = qs.order_by('name').values('id', 'name', 'abbreviation')[:limit]
+        return Response({
+            'count': total,
+            'results': [
+                {
+                    'id': row['id'],
+                    'name': row['name'],
+                    'abbreviation': row.get('abbreviation') or '',
+                }
+                for row in rows
+            ],
+        })
+
     @action(detail=True, methods=['GET'])
     def candidates(self, request, pk=None):
         party = self.get_object()
@@ -391,6 +445,29 @@ class SchemeViewSet(viewsets.ModelViewSet):
     filterset_fields = ['scheme_type', 'constituency']
     search_fields = ['name', 'description']
     ordering = ['-created_at']
+
+    @action(detail=False, methods=['GET'], url_path='lookup')
+    def lookup(self, request):
+        search = request.query_params.get('search', '').strip()
+        limit = _lookup_limit(request)
+
+        qs = self.get_queryset()
+        if search:
+            qs = qs.filter(Q(name__icontains=search) | Q(description__icontains=search))
+
+        total = qs.count()
+        rows = qs.order_by('name').values('id', 'name', 'scheme_type')[:limit]
+        return Response({
+            'count': total,
+            'results': [
+                {
+                    'id': row['id'],
+                    'name': row['name'],
+                    'scheme_type': row.get('scheme_type') or '',
+                }
+                for row in rows
+            ],
+        })
 
     # ── bulk upload ──────────────────────────────────────────────────────────
     @action(detail=False, methods=['POST'], url_path='bulk-upload',

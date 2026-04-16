@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 import re
 from typing import Dict, Iterable
+from time import monotonic
 
 from campaign_os.activities.models import FieldSurvey
 from campaign_os.voters.models import Voter
@@ -25,6 +26,24 @@ WORKFLOW_LABELS = {
 
 PHONE_FIELDS = ('phone', 'phone2', 'alt_phoneno2', 'alt_phoneno3')
 NON_DIGIT_RE = re.compile(r'\D+')
+WORKFLOW_CACHE_TTL_SECONDS = 20
+_voter_status_cache: Dict[tuple, tuple[float, Dict[int, dict]]] = {}
+_nonvoter_status_cache: Dict[tuple, tuple[float, Dict[int, dict]]] = {}
+
+
+def _cache_get(cache_store, key):
+    payload = cache_store.get(key)
+    if not payload:
+        return None
+    expires_at, value = payload
+    if monotonic() >= expires_at:
+        cache_store.pop(key, None)
+        return None
+    return value
+
+
+def _cache_set(cache_store, key, value):
+    cache_store[key] = (monotonic() + WORKFLOW_CACHE_TTL_SECONDS, value)
 
 
 def _normalize_phone(value) -> str:
@@ -171,6 +190,11 @@ def build_voter_status_map(voter_ids: Iterable[int]) -> Dict[int, dict]:
     voter_id_set = {int(v) for v in voter_ids if v}
     if not voter_id_set:
         return {}
+
+    cache_key = tuple(sorted(voter_id_set))
+    cached = _cache_get(_voter_status_cache, cache_key)
+    if cached is not None:
+        return {voter_id: dict(status) for voter_id, status in cached.items()}
 
     current_voters = list(
         Voter.objects
@@ -377,6 +401,7 @@ def build_voter_status_map(voter_ids: Iterable[int]) -> Dict[int, dict]:
 
         status_map[voter_id] = resolved
 
+    _cache_set(_voter_status_cache, cache_key, {voter_id: dict(status) for voter_id, status in status_map.items()})
     return status_map
 
 
@@ -421,6 +446,21 @@ def build_nonvoter_status_map(entity_type: str, entries: Iterable[dict]) -> Dict
 
     if not prepared_entries:
         return {}
+
+    cache_key = (
+        normalized_type,
+        tuple(sorted(
+            (
+                entry['source_id'],
+                entry['name'],
+                tuple(sorted(entry['phones'])),
+            )
+            for entry in prepared_entries
+        )),
+    )
+    cached = _cache_get(_nonvoter_status_cache, cache_key)
+    if cached is not None:
+        return {source_id: dict(status) for source_id, status in cached.items()}
 
     all_assignment_by_contact, _ = _build_assignment_contact_lookups(phone_values, names)
     all_survey_contact_keys, _ = _build_survey_contact_sets(phone_values, names)
@@ -542,4 +582,5 @@ def build_nonvoter_status_map(entity_type: str, entries: Iterable[dict]) -> Dict
             'telecaller_phone': assignment_info.get('telecaller_phone', ''),
         }
 
+    _cache_set(_nonvoter_status_cache, cache_key, {source_id: dict(status) for source_id, status in status_map.items()})
     return status_map

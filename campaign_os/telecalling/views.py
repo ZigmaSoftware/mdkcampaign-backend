@@ -412,12 +412,76 @@ class TelecallingAssignmentViewSet(viewsets.ModelViewSet):
         search = (request.query_params.get('search') or '').strip()
         workflow_status = (request.query_params.get('workflow_status') or '').strip().lower()
         contact_status = (request.query_params.get('contact_status') or '').strip().lower()
+        include_summary = (request.query_params.get('include_summary') or '').strip().lower() in {'1', 'true', 'yes'}
 
         if category not in {'volunteer', 'beneficiary'}:
             return Response(
                 {'detail': 'category must be volunteer or beneficiary'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        def serialize_volunteer(volunteer):
+            role_label = getattr(getattr(volunteer, 'volunteer_role', None), 'name', '') or volunteer.role or ''
+            return {
+                'id': volunteer.id,
+                'source_id': volunteer.id,
+                'name': volunteer.name or (volunteer.user.get_full_name() if volunteer.user_id else f'Volunteer #{volunteer.id}'),
+                'voter_id': volunteer.voter_id or '',
+                'phone': volunteer.phone or '',
+                'phone2': volunteer.phone2 or '',
+                'alt_phoneno2': '',
+                'alt_phoneno3': '',
+                'address': '',
+                'booth': volunteer.booth_id or 0,
+                'booth_no': getattr(getattr(volunteer, 'booth', None), 'number', '') or '',
+                'booth_name': getattr(getattr(volunteer, 'booth', None), 'name', '') or '',
+                'age': volunteer.age,
+                'gender': volunteer.gender or '',
+                'relation_label': role_label,
+                'entity_type': 'volunteer',
+                'phones': [volunteer.phone or '', volunteer.phone2 or ''],
+            }
+
+        def serialize_beneficiary(beneficiary):
+            scheme_label = getattr(getattr(beneficiary, 'scheme', None), 'name', '') or beneficiary.scheme_name or ''
+            return {
+                'id': beneficiary.id,
+                'source_id': beneficiary.id,
+                'name': beneficiary.name or f'Beneficiary #{beneficiary.id}',
+                'voter_id': beneficiary.voter_id or '',
+                'phone': beneficiary.phone or '',
+                'phone2': beneficiary.phone2 or '',
+                'alt_phoneno2': '',
+                'alt_phoneno3': '',
+                'address': beneficiary.address or '',
+                'booth': beneficiary.booth_id or 0,
+                'booth_no': getattr(getattr(beneficiary, 'booth', None), 'number', '') or '',
+                'booth_name': getattr(getattr(beneficiary, 'booth', None), 'name', '') or '',
+                'age': beneficiary.age,
+                'gender': beneficiary.gender or '',
+                'relation_label': scheme_label,
+                'entity_type': 'beneficiary',
+                'phones': [beneficiary.phone or '', beneficiary.phone2 or ''],
+            }
+
+        def hydrate_rows_with_status(rows):
+            status_map = build_nonvoter_status_map(category, rows)
+            workflow_summary = {}
+            for row in rows:
+                status_info = status_map.get(row['source_id'], {
+                    'status': 'unassigned',
+                    'label': WORKFLOW_LABELS['unassigned'],
+                    'is_locked': False,
+                    'telecaller_name': '',
+                    'telecaller_phone': '',
+                })
+                row['workflow_status'] = status_info['status']
+                row['workflow_label'] = status_info['label']
+                row['is_locked'] = status_info['is_locked']
+                row['assigned_telecaller_name'] = status_info.get('telecaller_name', '')
+                row['assigned_telecaller_phone'] = status_info.get('telecaller_phone', '')
+                workflow_summary[row['workflow_status']] = workflow_summary.get(row['workflow_status'], 0) + 1
+            return workflow_summary
 
         if category == 'volunteer':
             role_value = (request.query_params.get('role') or '').strip()
@@ -452,29 +516,6 @@ class TelecallingAssignmentViewSet(viewsets.ModelViewSet):
                 ).filter(
                     Q(phone2__isnull=True) | Q(phone2__exact='')
                 )
-
-            raw_rows = []
-            for volunteer in queryset.order_by('name', 'id'):
-                role_label = getattr(getattr(volunteer, 'volunteer_role', None), 'name', '') or volunteer.role or ''
-                raw_rows.append({
-                    'id': volunteer.id,
-                    'source_id': volunteer.id,
-                    'name': volunteer.name or (volunteer.user.get_full_name() if volunteer.user_id else f'Volunteer #{volunteer.id}'),
-                    'voter_id': volunteer.voter_id or '',
-                    'phone': volunteer.phone or '',
-                    'phone2': volunteer.phone2 or '',
-                    'alt_phoneno2': '',
-                    'alt_phoneno3': '',
-                    'address': '',
-                    'booth': volunteer.booth_id or 0,
-                    'booth_no': getattr(getattr(volunteer, 'booth', None), 'number', '') or '',
-                    'booth_name': getattr(getattr(volunteer, 'booth', None), 'name', '') or '',
-                    'age': volunteer.age,
-                    'gender': volunteer.gender or '',
-                    'relation_label': role_label,
-                    'entity_type': 'volunteer',
-                    'phones': [volunteer.phone or '', volunteer.phone2 or ''],
-                })
         else:
             scheme_value = (request.query_params.get('scheme') or '').strip()
             queryset = Beneficiary.objects.filter(is_active=True).select_related('booth', 'scheme')
@@ -510,45 +551,32 @@ class TelecallingAssignmentViewSet(viewsets.ModelViewSet):
                     Q(phone2__isnull=True) | Q(phone2__exact='')
                 )
 
-            raw_rows = []
-            for beneficiary in queryset.order_by('name', 'id'):
-                scheme_label = getattr(getattr(beneficiary, 'scheme', None), 'name', '') or beneficiary.scheme_name or ''
-                raw_rows.append({
-                    'id': beneficiary.id,
-                    'source_id': beneficiary.id,
-                    'name': beneficiary.name or f'Beneficiary #{beneficiary.id}',
-                    'voter_id': beneficiary.voter_id or '',
-                    'phone': beneficiary.phone or '',
-                    'phone2': beneficiary.phone2 or '',
-                    'alt_phoneno2': '',
-                    'alt_phoneno3': '',
-                    'address': beneficiary.address or '',
-                    'booth': beneficiary.booth_id or 0,
-                    'booth_no': getattr(getattr(beneficiary, 'booth', None), 'number', '') or '',
-                    'booth_name': getattr(getattr(beneficiary, 'booth', None), 'name', '') or '',
-                    'age': beneficiary.age,
-                    'gender': beneficiary.gender or '',
-                    'relation_label': scheme_label,
-                    'entity_type': 'beneficiary',
-                    'phones': [beneficiary.phone or '', beneficiary.phone2 or ''],
-                })
+        # Fast path: paginate DB rows first and compute workflow only for this page.
+        if not workflow_status and not include_summary:
+            ordered_queryset = queryset.order_by('name', 'id')
+            raw_count = ordered_queryset.count()
+            page = self.paginate_queryset(ordered_queryset)
+            objects = list(page) if page is not None else list(ordered_queryset)
+            payload = [
+                serialize_volunteer(obj) if category == 'volunteer' else serialize_beneficiary(obj)
+                for obj in objects
+            ]
+            workflow_summary = hydrate_rows_with_status(payload)
+            response = (
+                self.get_paginated_response(payload)
+                if page is not None
+                else Response({'count': len(payload), 'next': None, 'previous': None, 'results': payload})
+            )
+            response.data['raw_count'] = raw_count
+            response.data['workflow_summary'] = workflow_summary
+            return response
 
-        status_map = build_nonvoter_status_map(category, raw_rows)
-        workflow_summary = {}
-        for row in raw_rows:
-            status_info = status_map.get(row['source_id'], {
-                'status': 'unassigned',
-                'label': WORKFLOW_LABELS['unassigned'],
-                'is_locked': False,
-                'telecaller_name': '',
-                'telecaller_phone': '',
-            })
-            row['workflow_status'] = status_info['status']
-            row['workflow_label'] = status_info['label']
-            row['is_locked'] = status_info['is_locked']
-            row['assigned_telecaller_name'] = status_info.get('telecaller_name', '')
-            row['assigned_telecaller_phone'] = status_info.get('telecaller_phone', '')
-            workflow_summary[row['workflow_status']] = workflow_summary.get(row['workflow_status'], 0) + 1
+        # Fallback path for workflow filtering / full summary requests.
+        raw_rows = [
+            serialize_volunteer(obj) if category == 'volunteer' else serialize_beneficiary(obj)
+            for obj in queryset.order_by('name', 'id')
+        ]
+        workflow_summary = hydrate_rows_with_status(raw_rows)
 
         raw_count = len(raw_rows)
         filtered_rows = raw_rows
