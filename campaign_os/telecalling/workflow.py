@@ -8,6 +8,7 @@ from time import monotonic
 from campaign_os.activities.models import FieldSurvey
 from campaign_os.voters.models import Voter
 from django.db.models import Q
+from django.db.models.functions import Lower, Trim
 
 from .models import TelecallingAssignmentVoter, TelecallingFeedback
 
@@ -44,6 +45,11 @@ def _cache_get(cache_store, key):
 
 def _cache_set(cache_store, key, value):
     cache_store[key] = (monotonic() + WORKFLOW_CACHE_TTL_SECONDS, value)
+
+
+def clear_workflow_caches():
+    _voter_status_cache.clear()
+    _nonvoter_status_cache.clear()
 
 
 def _normalize_phone(value) -> str:
@@ -93,6 +99,31 @@ def _name_filter(field_name: str, names: set[str]) -> Q:
     return query
 
 
+def _iter_lookup_rows(base_queryset, *, name_field: str, phone_field: str, phone_values: set[str], normalized_names: set[str]):
+    seen_ids: set[int] = set()
+    querysets = []
+
+    if phone_values:
+        querysets.append(base_queryset.filter(**{f'{phone_field}__in': tuple(phone_values)}))
+
+    if normalized_names:
+        if len(normalized_names) <= 50:
+            querysets.append(base_queryset.filter(_name_filter(name_field, normalized_names)))
+        else:
+            querysets.append(
+                base_queryset
+                .annotate(_lookup_name=Lower(Trim(name_field)))
+                .filter(_lookup_name__in=list(normalized_names))
+            )
+
+    for queryset in querysets:
+        for row in queryset:
+            if row.id in seen_ids:
+                continue
+            seen_ids.add(row.id)
+            yield row
+
+
 def _build_assignment_contact_lookups(phone_values: set[str], names: set[str] | None = None):
     latest_any_by_key: Dict[str, dict] = {}
     latest_nonvoter_by_key: Dict[str, dict] = {}
@@ -100,18 +131,18 @@ def _build_assignment_contact_lookups(phone_values: set[str], names: set[str] | 
     if not phone_values and not normalized_names:
         return latest_any_by_key, latest_nonvoter_by_key
 
-    assignment_filter = Q()
-    if phone_values:
-        assignment_filter |= Q(phone__in=tuple(phone_values))
-    assignment_filter |= _name_filter('voter_name', normalized_names)
-
-    assignment_qs = (
+    assignment_base_qs = (
         TelecallingAssignmentVoter.objects
-        .filter(assignment_filter)
         .select_related('assignment', 'voter')
         .order_by('-assignment__created_at', '-assignment_id', '-id')
     )
-    for row in assignment_qs:
+    for row in _iter_lookup_rows(
+        assignment_base_qs,
+        name_field='voter_name',
+        phone_field='phone',
+        phone_values=phone_values,
+        normalized_names=normalized_names,
+    ):
         info = {
             'created_at': row.assignment.created_at,
             'telecaller_id': row.assignment.telecaller_id,
@@ -138,19 +169,19 @@ def _build_survey_contact_sets(phone_values: set[str], names: set[str] | None = 
     if not phone_values and not normalized_names:
         return all_keys, nonvoter_keys
 
-    survey_filter = Q()
-    if phone_values:
-        survey_filter |= Q(phone__in=tuple(phone_values))
-    survey_filter |= _name_filter('voter_name', normalized_names)
-
-    survey_qs = (
+    survey_base_qs = (
         FieldSurvey.objects
         .filter(is_active=True)
-        .filter(survey_filter)
         .select_related('voter')
         .order_by('-survey_date', '-created_at', '-id')
     )
-    for survey in survey_qs:
+    for survey in _iter_lookup_rows(
+        survey_base_qs,
+        name_field='voter_name',
+        phone_field='phone',
+        phone_values=phone_values,
+        normalized_names=normalized_names,
+    ):
         survey_phones = {survey.phone or ''}
         voter = getattr(survey, 'voter', None)
         if voter:
@@ -490,13 +521,19 @@ def build_nonvoter_status_map(entity_type: str, entries: Iterable[dict]) -> Dict
 
     survey_by_name_phone = {}
     survey_by_name = {}
-    if names:
-        survey_qs = (
+    if names or phone_values:
+        survey_base_qs = (
             FieldSurvey.objects
-            .filter(is_active=True, voter__isnull=True, voter_name__in=[entry.get('display_name', '') for entry in prepared_entries if entry.get('display_name')])
+            .filter(is_active=True, voter__isnull=True)
             .order_by('-survey_date', '-created_at', '-id')
         )
-        for survey in survey_qs:
+        for survey in _iter_lookup_rows(
+            survey_base_qs,
+            name_field='voter_name',
+            phone_field='phone',
+            phone_values=phone_values,
+            normalized_names=names,
+        ):
             normalized_name = _normalize_name(survey.voter_name)
             if not normalized_name:
                 continue

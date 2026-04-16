@@ -27,6 +27,7 @@ from campaign_os.core.permissions import (
 from campaign_os.masters.models import Booth
 from campaign_os.telecalling.models import TelecallingFeedback
 from campaign_os.telecalling.models import TelecallingAssignmentVoter
+from campaign_os.telecalling.workflow import clear_workflow_caches
 
 
 logger = logging.getLogger(__name__)
@@ -476,6 +477,7 @@ class FieldSurveyViewSet(viewsets.ModelViewSet):
             surveyed_by=serializer.validated_data.get('surveyed_by') or self.request.user.username,
         )
         _sync_voter_from_survey(instance)
+        clear_workflow_caches()
 
     def perform_update(self, serializer):
         instance = serializer.save(updated_by=self.request.user)
@@ -484,10 +486,12 @@ class FieldSurveyViewSet(viewsets.ModelViewSet):
             _sync_field_followup_status(instance, self.request.user)
         except Exception:
             logger.exception("Failed to sync field follow-up status for survey %s", instance.pk)
+        clear_workflow_caches()
 
     def perform_destroy(self, instance):
         instance.is_active = False
         instance.save()
+        clear_workflow_caches()
 
     @action(detail=False, methods=['get'], url_path='followup-list')
     def followup_list(self, request):

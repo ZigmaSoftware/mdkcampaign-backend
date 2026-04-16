@@ -26,7 +26,12 @@ from campaign_os.volunteers.models import Volunteer
 
 from .models import TelecallingAssignment, TelecallingAssignmentVoter, TelecallingFeedback
 from .serializers import TelecallingAssignmentSerializer, TelecallingFeedbackSerializer
-from .workflow import WORKFLOW_LABELS, build_nonvoter_status_map, build_voter_status_map
+from .workflow import (
+    WORKFLOW_LABELS,
+    build_nonvoter_status_map,
+    build_voter_status_map,
+    clear_workflow_caches,
+)
 
 
 SURVEY_ID_PATTERN = re.compile(r'\[survey_id:(\d+)\]')
@@ -595,6 +600,8 @@ class TelecallingAssignmentViewSet(viewsets.ModelViewSet):
                 workflow_summary[row['workflow_status']] = workflow_summary.get(row['workflow_status'], 0) + 1
             return workflow_summary
 
+        role_value = ''
+        scheme_value = ''
         if category == 'volunteer':
             role_value = (request.query_params.get('role') or '').strip()
             queryset = Volunteer.objects.filter(is_active=True).select_related('user', 'booth', 'volunteer_role')
@@ -669,7 +676,6 @@ class TelecallingAssignmentViewSet(viewsets.ModelViewSet):
         ]
         hydrate_rows_with_status(raw_rows)
         deduped_rows = _dedupe_assignable_rows(raw_rows)
-
         raw_count = len(deduped_rows)
         workflow_summary = _workflow_summary_from_rows(deduped_rows)
         filtered_rows = deduped_rows
@@ -754,13 +760,16 @@ class TelecallingAssignmentViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
+        clear_workflow_caches()
 
     def perform_update(self, serializer):
         serializer.save(updated_by=self.request.user)
+        clear_workflow_caches()
 
     def perform_destroy(self, instance):
         instance.is_active = False
         instance.save()
+        clear_workflow_caches()
 
     @action(detail=False, methods=['get'], url_path='filters')
     def filters(self, request):
@@ -1038,13 +1047,16 @@ class TelecallingFeedbackViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
+        clear_workflow_caches()
 
     def perform_update(self, serializer):
         serializer.save(updated_by=self.request.user)
+        clear_workflow_caches()
 
     def perform_destroy(self, instance):
         instance.is_active = False
         instance.save()
+        clear_workflow_caches()
 
     @action(detail=False, methods=['get'], url_path='review-list')
     def review_list(self, request):
